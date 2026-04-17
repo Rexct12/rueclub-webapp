@@ -1,0 +1,37 @@
+{
+  "name": "rueclub-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "seed:users": "tsx scripts/seed-users.ts",
+    "import:csv": "tsx scripts/import-csv.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^1.50.1",
+    "@google/generative-ai": "^0.24.1",
+    "bcryptjs": "^3.0.3",
+    "csv-parse": "^6.2.1",
+    "firebase-admin": "^13.8.0",
+    "jose": "^6.2.2",
+    "next": "16.2.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^4.1.4"
+  }
+}
