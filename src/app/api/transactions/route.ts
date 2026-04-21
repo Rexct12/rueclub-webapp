@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ZodError } from "zod";
 import {
   capitalDepositInputSchema,
   expenseInputSchema,
@@ -24,71 +25,92 @@ const deleteMap = {
   profitSharing: "profitSharings",
 } as const;
 
+function jsonFromError(error: unknown) {
+  if (error instanceof ZodError) {
+    const message = error.issues.map((issue) => issue.message).join("; ") || "Validasi gagal.";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+  if (error instanceof Error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ error: "Gagal memproses transaksi." }, { status: 500 });
+}
+
 export async function POST(request: Request) {
-  const user = await getSessionUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await request.json();
+
+    if (body.type === "participantPayment") {
+      const input = participantPaymentInputSchema.parse(body.payload);
+      const row = await createParticipantPayment(input, user.id);
+      return NextResponse.json({ row });
+    }
+
+    if (body.type === "expense") {
+      const input = expenseInputSchema.parse(body.payload);
+      const row = await createExpense(input, user.id);
+      return NextResponse.json({ row });
+    }
+
+    if (body.type === "capitalDeposit") {
+      const input = capitalDepositInputSchema.parse(body.payload);
+      const row = await createCapitalDeposit(input, user.id);
+      return NextResponse.json({ row });
+    }
+
+    if (body.type === "profitSharing") {
+      const input = profitSharingInputSchema.parse(body.payload);
+      const row = await createProfitSharing(input, user.id);
+      return NextResponse.json({ row });
+    }
+
+    return NextResponse.json({ error: "Unsupported transaction type." }, { status: 400 });
+  } catch (error) {
+    console.error("[api/transactions POST]", error);
+    return jsonFromError(error);
   }
-
-  const body = await request.json();
-
-  if (body.type === "participantPayment") {
-    const input = participantPaymentInputSchema.parse(body.payload);
-    const row = await createParticipantPayment(input, user.id);
-    return NextResponse.json({ row });
-  }
-
-  if (body.type === "expense") {
-    const input = expenseInputSchema.parse(body.payload);
-    const row = await createExpense(input, user.id);
-    return NextResponse.json({ row });
-  }
-
-  if (body.type === "capitalDeposit") {
-    const input = capitalDepositInputSchema.parse(body.payload);
-    const row = await createCapitalDeposit(input, user.id);
-    return NextResponse.json({ row });
-  }
-
-  if (body.type === "profitSharing") {
-    const input = profitSharingInputSchema.parse(body.payload);
-    const row = await createProfitSharing(input, user.id);
-    return NextResponse.json({ row });
-  }
-
-  return NextResponse.json({ error: "Unsupported transaction type." }, { status: 400 });
 }
 
 export async function PUT(request: Request) {
-  const user = await getSessionUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  try {
+    const user = await getSessionUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-  const body = await request.json();
-  if (!body.id) {
-    return NextResponse.json({ error: "Transaction id wajib diisi." }, { status: 400 });
-  }
+    const body = await request.json();
+    if (!body.id) {
+      return NextResponse.json({ error: "Transaction id wajib diisi." }, { status: 400 });
+    }
 
-  if (body.type === "participantPayment") {
-    const input = participantPaymentInputSchema.parse(body.payload);
-    const row = await updateParticipantPayment(body.id, input, user.id);
-    return NextResponse.json({ row });
-  }
+    if (body.type === "participantPayment") {
+      const input = participantPaymentInputSchema.parse(body.payload);
+      const row = await updateParticipantPayment(body.id, input, user.id);
+      return NextResponse.json({ row });
+    }
 
-  if (body.type === "expense") {
-    const input = expenseInputSchema.parse(body.payload);
-    const row = await updateExpense(body.id, input, user.id);
-    return NextResponse.json({ row });
-  }
+    if (body.type === "expense") {
+      const input = expenseInputSchema.parse(body.payload);
+      const row = await updateExpense(body.id, input, user.id);
+      return NextResponse.json({ row });
+    }
 
-  if (body.type === "profitSharing") {
-    const input = profitSharingInputSchema.parse(body.payload);
-    const row = await updateProfitSharing(body.id, input, user.id);
-    return NextResponse.json({ row });
-  }
+    if (body.type === "profitSharing") {
+      const input = profitSharingInputSchema.parse(body.payload);
+      const row = await updateProfitSharing(body.id, input, user.id);
+      return NextResponse.json({ row });
+    }
 
-  return NextResponse.json({ error: "Unsupported transaction type." }, { status: 400 });
+    return NextResponse.json({ error: "Unsupported transaction type." }, { status: 400 });
+  } catch (error) {
+    console.error("[api/transactions PUT]", error);
+    return jsonFromError(error);
+  }
 }
 
 export async function DELETE(request: Request) {

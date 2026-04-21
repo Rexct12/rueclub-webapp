@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { Account, AiDraft, AppData, Expense, ParticipantPayment, ProfitSharing, Session } from "@/lib/domain";
 import { expenseCategories, paymentCategories, paymentMethods, paymentStatuses, profitSharingCalculationTypes, todayInBangkok } from "@/lib/domain";
 import { formatCurrency, formatNumber, parseRupiah } from "@/lib/format";
+import { jsonErrorMessage, readResponseJson } from "@/lib/fetch-json";
 import type { DashboardReport } from "@/lib/reports";
 
 type Props = { userName: string; data: AppData; report: DashboardReport; backend: string };
@@ -241,20 +242,20 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
 
   async function postJson(url: string, payload: unknown) {
     const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const data = await readResponseJson(response);
     if (!response.ok) {
-      const error = (await response.json()) as { error?: string };
-      throw new Error(error.error ?? "Request gagal.");
+      throw new Error(jsonErrorMessage(data) || `Request gagal (${response.status}).`);
     }
-    return response.json();
+    return (data ?? {}) as unknown;
   }
 
   async function putJson(url: string, payload: unknown) {
     const response = await fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const data = await readResponseJson(response);
     if (!response.ok) {
-      const error = (await response.json()) as { error?: string };
-      throw new Error(error.error ?? "Request gagal.");
+      throw new Error(jsonErrorMessage(data) || `Request gagal (${response.status}).`);
     }
-    return response.json();
+    return (data ?? {}) as unknown;
   }
 
   function reloadAfter(message: string) {
@@ -324,8 +325,8 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       reloadAfter("Akun dihapus.");
       return;
     }
-    const error = (await response.json()) as { error?: string };
-    setToast({ type: "error", message: error.error ?? "Gagal menghapus akun." });
+    const data = await readResponseJson(response);
+    setToast({ type: "error", message: jsonErrorMessage(data) || "Gagal menghapus akun." });
   }
 
   function filledParticipants(rows: ParticipantDraft[]) {
@@ -373,7 +374,10 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         if (!expense.description.trim() || !expense.accountId) throw new Error("Expense awal yang nominalnya diisi wajib punya keterangan dan akun keluar.");
       }
       if (!sessionDraft.date || !sessionDraft.code.trim()) throw new Error("Tanggal dan kode sesi wajib diisi.");
-      const result = (await postJson("/api/master", { type: "session", ...sessionDraft, defaultSlotPrice: money(sessionDraft.defaultSlotPrice), courtPrice: money(sessionDraft.courtPrice), active: true })) as { session: Session };
+      const result = (await postJson("/api/master", { type: "session", ...sessionDraft, defaultSlotPrice: money(sessionDraft.defaultSlotPrice), courtPrice: money(sessionDraft.courtPrice), active: true })) as { session?: Session };
+      if (!result.session) {
+        throw new Error("Server tidak mengembalikan data sesi. Coba lagi atau cek koneksi.");
+      }
       for (const expense of extraExpenses) {
         await postJson("/api/transactions", { type: "expense", payload: { date: result.session.date, description: expense.description, category: expenseCategories.includes(expense.category as never) ? expense.category : "Biaya Compliment", sessionId: result.session.id, amount: money(expense.amount), accountId: expense.accountId, notes: expense.notes, reimbursed: false } });
       }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { jsonErrorMessage, readResponseJson } from "@/lib/fetch-json";
 
 export function LoginForm() {
   const [name, setName] = useState("");
@@ -21,8 +22,8 @@ export function LoginForm() {
 
     setLoading(false);
     if (!response.ok) {
-      const payload = (await response.json()) as { error?: string };
-      setError(payload.error ?? "Login gagal.");
+      const data = await readResponseJson(response);
+      setError(jsonErrorMessage(data) || "Login gagal.");
       return;
     }
 
