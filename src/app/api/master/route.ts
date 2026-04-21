@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { parseRupiah } from "@/lib/format";
+import {
+  DEFAULT_SESSION_CODE_FORMAT,
+  generateSessionCodeFromSessions,
+  isSessionCodeFormat,
+} from "@/lib/session-code";
 import { getSessionUser } from "@/server/auth";
 import { deleteDocument, deleteSession, getAppData, upsertAccount, upsertSession } from "@/server/store";
 
@@ -35,11 +40,26 @@ export async function POST(request: Request) {
     }
 
     if (body.type === "session") {
+      const data = await getAppData();
+      const sessionCodeFormat = isSessionCodeFormat(body.sessionCodeFormat)
+        ? body.sessionCodeFormat
+        : DEFAULT_SESSION_CODE_FORMAT;
+      const code = String(body.code ?? "").trim() || generateSessionCodeFromSessions({
+        seed: {
+          date: String(body.date ?? ""),
+          venue: String(body.venue ?? ""),
+          code: "",
+        },
+        format: sessionCodeFormat,
+        sessions: data.sessions,
+        excludeSessionId: body.id ? String(body.id) : undefined,
+      });
+
       const session = await upsertSession({
         id: body.id,
         date: body.date,
         time: body.time,
-        code: body.code,
+        code,
         venue: body.venue,
         defaultSlotPrice: parseRupiah(body.defaultSlotPrice),
         courtPrice: parseRupiah(body.courtPrice),

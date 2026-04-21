@@ -8,6 +8,13 @@ import { expenseCategories, paymentCategories, paymentMethods, paymentStatuses, 
 import { formatCurrency, formatNumber, parseRupiah } from "@/lib/format";
 import { jsonErrorMessage, readResponseJson } from "@/lib/fetch-json";
 import type { DashboardReport } from "@/lib/reports";
+import {
+  DEFAULT_SESSION_CODE_FORMAT,
+  generateSessionCodeFromSessions,
+  isSessionCodeFormat,
+  sessionCodeFormatOptions,
+  type SessionCodeFormat,
+} from "@/lib/session-code";
 
 type Props = { userName: string; data: AppData; report: DashboardReport; backend: string };
 type Toast = { type: "ok" | "error"; message: string };
@@ -85,6 +92,12 @@ function readDateFormat(): DateFormat {
   if (typeof window === "undefined") return "yyyy-mm-dd";
   const savedFormat = window.localStorage.getItem("rueclub.dateFormat");
   return dateFormatOptions.some(([format]) => format === savedFormat) ? (savedFormat as DateFormat) : "yyyy-mm-dd";
+}
+
+function readSessionCodeFormat(): SessionCodeFormat {
+  if (typeof window === "undefined") return DEFAULT_SESSION_CODE_FORMAT;
+  const savedFormat = window.localStorage.getItem("rueclub.sessionCodeFormat");
+  return isSessionCodeFormat(savedFormat) ? savedFormat : DEFAULT_SESSION_CODE_FORMAT;
 }
 
 function formatDisplayDate(date: string, dateFormat: DateFormat) {
@@ -181,6 +194,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const [timeFormat, setTimeFormat] = useState<TimeFormat>(() => readTimeFormat());
   const [colorMode, setColorMode] = useState<ColorMode>(() => readColorMode());
   const [dateFormat, setDateFormat] = useState<DateFormat>(() => readDateFormat());
+  const [sessionCodeFormat, setSessionCodeFormat] = useState<SessionCodeFormat>(() => readSessionCodeFormat());
   const [isPending, startTransition] = useTransition();
   const today = todayInBangkok();
 
@@ -196,6 +210,10 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   useEffect(() => {
     window.localStorage.setItem("rueclub.dateFormat", dateFormat);
   }, [dateFormat]);
+
+  useEffect(() => {
+    window.localStorage.setItem("rueclub.sessionCodeFormat", sessionCodeFormat);
+  }, [sessionCodeFormat]);
 
   const activeAccounts = useMemo(() => data.accounts.filter((account) => account.active), [data.accounts]);
   const activeSessions = useMemo(() => data.sessions.filter((session) => session.active), [data.sessions]);
@@ -234,6 +252,18 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const detailRows = detailMode === "wizard" ? wizardParticipants : quickParticipants;
   const detailParticipant = detailId ? detailRows.find((row) => row.id === detailId) ?? null : null;
 
+  const generateCodeByDraft = (draft: SessionDraft, excludeSessionId?: string) =>
+    generateSessionCodeFromSessions({
+      seed: {
+        date: draft.date || today,
+        venue: draft.venue,
+        code: draft.code,
+      },
+      format: sessionCodeFormat,
+      sessions: data.sessions,
+      excludeSessionId,
+    });
+
   function goToView(view: View) {
     setActiveView(view);
     window.history.replaceState(null, "", `#${view}`);
@@ -264,22 +294,27 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   }
 
   function openWizard() {
+    const initialDraft: SessionDraft = { date: today, time: "", code: "", venue: "", defaultSlotPrice: "0", courtPrice: "0", courtFree: false, courtExpenseAccountId: firstAccountId };
+    const initialCode = generateCodeByDraft(initialDraft);
     setWizardStep(1);
     setWizardError(null);
     setSavingWizard(false);
-    setSessionDraft({ date: today, time: "", code: "", venue: "", defaultSlotPrice: "0", courtPrice: "0", courtFree: false, courtExpenseAccountId: firstAccountId });
+    setSessionDraft({ ...initialDraft, code: initialCode });
     setInitialExpenses(makeExpenses(firstAccountId));
     setWizardParticipants(makeParticipants(8, "0", firstAccountId));
     setWizardOpen(true);
   }
 
   function nextStep() {
-    if (wizardStep === 1 && (!sessionDraft.date || !sessionDraft.code.trim())) {
-      setWizardError("Tanggal dan kode sesi wajib diisi.");
+    if (wizardStep === 1 && !sessionDraft.date) {
+      setWizardError("Tanggal sesi wajib diisi.");
       return;
     }
     setWizardError(null);
     if (wizardStep === 1) {
+      if (!sessionDraft.code.trim()) {
+        setSessionDraft((current) => ({ ...current, code: generateCodeByDraft(current) }));
+      }
       setWizardParticipants((rows) => rows.map((row) => row.slotPrice && row.slotPrice !== "0" ? row : { ...row, slotPrice: sessionDraft.defaultSlotPrice || "0" }));
     }
     setWizardStep((step) => Math.min(4, step + 1) as Step);
@@ -300,7 +335,39 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     const formData = new FormData(event.currentTarget);
     const payload = type === "account"
       ? { type, name: formData.get("name"), accountType: formData.get("accountType"), openingBalance: money(String(formData.get("openingBalance") ?? 0)) }
-      : { id: formData.get("id") || undefined, type, date: formData.get("date"), time: formData.get("time"), code: formData.get("code"), venue: formData.get("venue"), defaultSlotPrice: money(String(formData.get("defaultSlotPrice") ?? 0)), courtPrice: money(String(formData.get("courtPrice") ?? 0)), courtFree: formData.get("courtFree") === "on", courtExpenseAccountId: formData.get("courtExpenseAccountId") || undefined, active: formData.get("active") !== "false" };
+      : {
+        id: formData.get("id") || undefined,
+        type,
+        date: String(formData.get("date") ?? ""),
+        time: formData.get("time"),
+        code: String(formData.get("code") ?? "").trim(),
+        venue: String(formData.get("venue") ?? ""),
+        defaultSlotPrice: money(String(formData.get("defaultSlotPrice") ?? 0)),
+        courtPrice: money(String(formData.get("courtPrice") ?? 0)),
+        courtFree: formData.get("courtFree") === "on",
+        courtExpenseAccountId: formData.get("courtExpenseAccountId") || undefined,
+        active: formData.get("active") !== "false",
+        sessionCodeFormat,
+      };
+
+    if (type === "session") {
+      const currentCode = String(payload.code ?? "").trim();
+      if (!currentCode) {
+        payload.code = generateCodeByDraft(
+          {
+            date: String(payload.date ?? today),
+            time: String(payload.time ?? ""),
+            code: "",
+            venue: String(payload.venue ?? ""),
+            defaultSlotPrice: String(payload.defaultSlotPrice ?? 0),
+            courtPrice: String(payload.courtPrice ?? 0),
+            courtFree: Boolean(payload.courtFree),
+            courtExpenseAccountId: String(payload.courtExpenseAccountId ?? ""),
+          },
+          String(payload.id ?? "") || undefined,
+        );
+      }
+    }
     try {
       await postJson("/api/master", payload);
       reloadAfter(type === "account" ? "Akun ditambahkan." : "Sesi disimpan.");
@@ -373,8 +440,17 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       for (const expense of extraExpenses) {
         if (!expense.description.trim() || !expense.accountId) throw new Error("Expense awal yang nominalnya diisi wajib punya keterangan dan akun keluar.");
       }
-      if (!sessionDraft.date || !sessionDraft.code.trim()) throw new Error("Tanggal dan kode sesi wajib diisi.");
-      const result = (await postJson("/api/master", { type: "session", ...sessionDraft, defaultSlotPrice: money(sessionDraft.defaultSlotPrice), courtPrice: money(sessionDraft.courtPrice), active: true })) as { session?: Session };
+      if (!sessionDraft.date) throw new Error("Tanggal sesi wajib diisi.");
+      const normalizedCode = sessionDraft.code.trim() || generateCodeByDraft(sessionDraft);
+      const result = (await postJson("/api/master", {
+        type: "session",
+        ...sessionDraft,
+        code: normalizedCode,
+        sessionCodeFormat,
+        defaultSlotPrice: money(sessionDraft.defaultSlotPrice),
+        courtPrice: money(sessionDraft.courtPrice),
+        active: true,
+      })) as { session?: Session };
       if (!result.session) {
         throw new Error("Server tidak mengembalikan data sesi. Coba lagi atau cek koneksi.");
       }
@@ -556,14 +632,26 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
 
   function profitSharingPayloadFromForm(form: HTMLFormElement) {
     const base = Object.fromEntries(new FormData(form).entries());
+    const date = String(base.date ?? "").trim();
+    const sessionId = String(base.sessionId ?? "").trim();
+    const recipientName = String(base.recipientName ?? "").trim();
+    const accountId = String(base.accountId ?? "").trim();
+    const role = String(base.role ?? "").trim();
+    const notes = String(base.notes ?? "").trim();
     const calculationType = profitSharingCalculationTypes.includes(base.calculationType as never) ? String(base.calculationType) : "fixed";
     const baseAmount = money(String(base.baseAmount ?? 0));
     const percentage = Number(base.percentage ?? 0);
     const amount = profitSharingAmount(calculationType, percentage, String(base.amount ?? 0), baseAmount);
-    if (!String(base.recipientName ?? "").trim()) {
+    if (!date) {
+      throw new Error("Tanggal bagi hasil wajib diisi.");
+    }
+    if (!sessionId) {
+      throw new Error("Sesi bagi hasil wajib diisi.");
+    }
+    if (!recipientName) {
       throw new Error("Penerima bagi hasil wajib diisi.");
     }
-    if (!String(base.accountId ?? "").trim()) {
+    if (!accountId) {
       throw new Error("Akun keluar bagi hasil wajib dipilih.");
     }
     if (calculationType === "percent" && (!Number.isFinite(percentage) || percentage <= 0)) {
@@ -573,17 +661,17 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       throw new Error("Nominal fixed bagi hasil wajib lebih dari 0.");
     }
     return {
-      date: base.date,
-      sessionId: base.sessionId,
-      recipientName: base.recipientName,
-      role: base.role,
+      date,
+      sessionId,
+      recipientName,
+      role: role || undefined,
       calculationType,
       percentage: calculationType === "percent" ? percentage : undefined,
       baseAmount,
       amount,
-      accountId: base.accountId,
-      notes: base.notes,
-      receiptUrl: base.receiptUrl,
+      accountId,
+      notes: notes || undefined,
+      receiptUrl: String(base.receiptUrl ?? "").trim() || undefined,
     };
   }
 
@@ -660,7 +748,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         </section>
 
         <section className="session-workspace" id="input">
-          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} onDeleteAccount={deleteAccount} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} /></details>
+          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} onDeleteAccount={deleteAccount} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} /></details>
           <div className="section-head horizontal-head">
             <div><h2>Sesi Berjalan</h2><p>Pilih sesi untuk cek slot terisi, expense, profit, dan pembayaran yang belum masuk.</p></div>
             <div className="session-section-actions"><button className="secondary-button" onClick={() => goToView("reports")}>Lihat Laporan</button><button onClick={openWizard}>Buat Sesi Baru</button></div>
@@ -686,10 +774,10 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         <AiPanel aiInput={aiInput} draft={draft} isPending={isPending} onAiInput={setAiInput} onDraftChange={setDraft} onDraftCreate={createAiDraft} onDraftSave={saveDraft} today={today} />
         <ReportsPanel dateFormat={dateFormat} report={report} />
         <section className="panel" id="data"><div className="section-head"><h2>Transaksi Terakhir</h2><p>Hapus hanya untuk koreksi input. Edit penuh bisa ditambahkan di iterasi berikutnya.</p></div><ExportButtons /><RecentTransactions data={data} dateFormat={dateFormat} onDelete={deleteTransaction} /></section>
-        <SettingsPanel colorMode={colorMode} dateFormat={dateFormat} onColorModeChange={setColorMode} onDateFormatChange={setDateFormat} onTimeFormatChange={setTimeFormat} timeFormat={timeFormat} />
+        <SettingsPanel colorMode={colorMode} dateFormat={dateFormat} onColorModeChange={setColorMode} onDateFormatChange={setDateFormat} onSessionCodeFormatChange={setSessionCodeFormat} onTimeFormatChange={setTimeFormat} sessionCodeFormat={sessionCodeFormat} timeFormat={timeFormat} />
       </section>
 
-      {wizardOpen ? <SessionWizard accountOptions={accountOptions} dateFormat={dateFormat} error={wizardError} expenses={initialExpenses} isSaving={savingWizard} onClose={() => setWizardOpen(false)} onExpenseChange={setInitialExpenses} onParticipantDetail={(id) => openDetail("wizard", id)} onParticipantsChange={setWizardParticipants} onSave={saveWizard} onSessionChange={setSessionDraft} onStepBack={() => { setWizardError(null); setWizardStep((step) => Math.max(1, step - 1) as Step); }} onStepNext={nextStep} onStepSelect={goToWizardStep} participants={wizardParticipants} session={sessionDraft} step={wizardStep} timeFormat={timeFormat} /> : null}
+      {wizardOpen ? <SessionWizard accountOptions={accountOptions} dateFormat={dateFormat} error={wizardError} expenses={initialExpenses} isSaving={savingWizard} onClose={() => setWizardOpen(false)} onExpenseChange={setInitialExpenses} onParticipantDetail={(id) => openDetail("wizard", id)} onParticipantsChange={setWizardParticipants} onSave={saveWizard} onSessionChange={setSessionDraft} onSessionCodeGenerate={() => setSessionDraft((current) => ({ ...current, code: generateCodeByDraft(current) }))} onStepBack={() => { setWizardError(null); setWizardStep((step) => Math.max(1, step - 1) as Step); }} onStepNext={nextStep} onStepSelect={goToWizardStep} participants={wizardParticipants} session={sessionDraft} step={wizardStep} timeFormat={timeFormat} /> : null}
       {editingSession ? (
         <SessionEditModal
           accountOptions={accountOptions}
@@ -728,6 +816,7 @@ function SessionWizard({
   onParticipantsChange,
   onSave,
   onSessionChange,
+  onSessionCodeGenerate,
   onStepBack,
   onStepNext,
   onStepSelect,
@@ -747,6 +836,7 @@ function SessionWizard({
   onParticipantsChange: (participants: ParticipantDraft[]) => void;
   onSave: () => void;
   onSessionChange: (session: SessionDraft) => void;
+  onSessionCodeGenerate: () => void;
   onStepBack: () => void;
   onStepNext: () => void;
   onStepSelect: (step: Step) => void;
@@ -774,7 +864,7 @@ function SessionWizard({
           <div className="wizard-grid">
             <label>Tanggal sesi<input type="date" value={session.date} onChange={(event) => onSessionChange({ ...session, date: event.target.value })} required /></label>
             <label>Jam sesi<input type="time" value={session.time} onChange={(event) => onSessionChange({ ...session, time: event.target.value })} /></label>
-            <label>Kode sesi<input value={session.code} onChange={(event) => onSessionChange({ ...session, code: event.target.value })} placeholder="Kaya Padel-001" required /></label>
+            <label>Kode sesi<div className="session-code-input"><input value={session.code} onChange={(event) => onSessionChange({ ...session, code: event.target.value })} placeholder="venuecode-mmyy-nnn" required /><button type="button" className="secondary-button" onClick={onSessionCodeGenerate}>Auto</button></div></label>
             <label>Venue<input value={session.venue} onChange={(event) => onSessionChange({ ...session, venue: event.target.value })} placeholder="Kaya Padel" /></label>
             <label>Harga slot default<MoneyInput value={session.defaultSlotPrice} onValueChange={(value) => onSessionChange({ ...session, defaultSlotPrice: value })} /></label>
             <label>Harga lapangan<MoneyInput value={session.courtPrice} onValueChange={(value) => onSessionChange({ ...session, courtPrice: value })} disabled={session.courtFree} /></label>
@@ -1121,7 +1211,7 @@ function SessionEditModal({
                 <h3>Bagi Hasil / Payout</h3>
                 <p>Dasar persen saat ini: profit sebelum bagi hasil {formatCurrency(profitSharingBase)}.</p>
               </div>
-              <form className="profit-sharing-create-row" onSubmit={onProfitSharingCreate}>
+              <form className="profit-sharing-create-row" onSubmit={onProfitSharingCreate} noValidate>
                 <input type="hidden" name="date" value={session.date} />
                 <input type="hidden" name="sessionId" value={session.id} />
                 <input type="hidden" name="baseAmount" value={profitSharingBase} />
@@ -1342,7 +1432,7 @@ function ParticipantAppendModal({ accountOptions, onClose, onDetail, onParticipa
   );
 }
 
-function ManualAdminForms({ accounts, accountOptions, onDeleteAccount, onSaveMaster, onSaveTransaction, savingTransactionType, sessionOptions, today }: { accounts: Account[]; accountOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionOptions: Array<[string, string]>; today: string }) {
+function ManualAdminForms({ accounts, accountOptions, onDeleteAccount, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today }: { accounts: Account[]; accountOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string }) {
   return (
     <div className="manual-admin-grid">
       <FormPanel title="Tambah Modal">
@@ -1358,6 +1448,21 @@ function ManualAdminForms({ accounts, accountOptions, onDeleteAccount, onSaveMas
           <button type="submit" disabled={savingTransactionType !== null}>
             {savingTransactionType === "capitalDeposit" ? "Menyimpan..." : "Simpan Modal"}
           </button>
+        </form>
+      </FormPanel>
+
+      <FormPanel title="Tambah Sesi Manual">
+        <p className="form-help">Kode sesi boleh dikosongkan. Sistem akan auto-generate berdasarkan format aktif: {sessionCodeFormat}.</p>
+        <form onSubmit={(event) => onSaveMaster(event, "session")} className="form-grid">
+          <input name="date" type="date" defaultValue={today} required />
+          <input name="time" type="time" />
+          <input name="code" placeholder="Otomatis jika kosong" />
+          <input name="venue" placeholder="Venue" />
+          <MoneyInput name="defaultSlotPrice" placeholder="Harga slot default" defaultValue={0} />
+          <MoneyInput name="courtPrice" placeholder="Harga lapangan" defaultValue={0} />
+          <Select name="courtExpenseAccountId" options={accountOptions} />
+          <label className="checkbox"><input name="courtFree" type="checkbox" /> Lapangan free</label>
+          <button type="submit">Simpan Sesi</button>
         </form>
       </FormPanel>
 
@@ -1438,14 +1543,18 @@ function SettingsPanel({
   dateFormat,
   onColorModeChange,
   onDateFormatChange,
+  onSessionCodeFormatChange,
   onTimeFormatChange,
+  sessionCodeFormat,
   timeFormat,
 }: {
   colorMode: ColorMode;
   dateFormat: DateFormat;
   onColorModeChange: (mode: ColorMode) => void;
   onDateFormatChange: (format: DateFormat) => void;
+  onSessionCodeFormatChange: (format: SessionCodeFormat) => void;
   onTimeFormatChange: (format: TimeFormat) => void;
+  sessionCodeFormat: SessionCodeFormat;
   timeFormat: TimeFormat;
 }) {
   return (
@@ -1464,6 +1573,14 @@ function SettingsPanel({
           <div className="segmented-control date-format-control" role="group" aria-label="Format tanggal">
             {dateFormatOptions.map(([format, label]) => (
               <button className={dateFormat === format ? "active" : ""} key={format} type="button" aria-pressed={dateFormat === format} onClick={() => onDateFormatChange(format)}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="setting-row">
+          <div><h3>Format kode sesi</h3><p>Format auto-generate kode sesi saat membuat sesi baru.</p></div>
+          <div className="segmented-control date-format-control" role="group" aria-label="Format kode sesi">
+            {sessionCodeFormatOptions.map(([format, label]) => (
+              <button className={sessionCodeFormat === format ? "active" : ""} key={format} type="button" aria-pressed={sessionCodeFormat === format} onClick={() => onSessionCodeFormatChange(format)}>{label}</button>
             ))}
           </div>
         </div>

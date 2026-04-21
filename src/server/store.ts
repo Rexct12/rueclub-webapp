@@ -30,6 +30,7 @@ import {
   userSchema,
 } from "@/lib/domain";
 import { defaultAccounts } from "@/lib/defaults";
+import { buildMigratedSessionCodes, DEFAULT_SESSION_CODE_FORMAT } from "@/lib/session-code";
 import { getAdminDb, isFirebaseConfigured } from "@/server/firebase";
 
 type LocalStore = AppData & {
@@ -172,14 +173,36 @@ export async function getAppData(): Promise<AppData> {
     readCollection("profitSharings", profitSharingSchema.parse),
   ]);
 
+  const migratedSessions = await migrateSessionCodesIfNeeded(sessions);
+
   return {
     accounts: (accounts.length ? accounts : defaultAccounts).filter(isRealMoneyAccount),
-    sessions,
+    sessions: migratedSessions,
     participantPayments,
     expenses,
     capitalDeposits,
     profitSharings,
   };
+}
+
+async function migrateSessionCodesIfNeeded(sessions: Session[]) {
+  const updates = buildMigratedSessionCodes(sessions, DEFAULT_SESSION_CODE_FORMAT);
+  if (!updates.length) return sessions;
+
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const migratedSessions = [...sessions];
+
+  for (const update of updates) {
+    const existing = byId.get(update.id);
+    if (!existing) continue;
+    const migrated = sessionSchema.parse({ ...existing, code: update.code });
+    await saveDocument("sessions", migrated);
+    await syncSessionCourtExpense(migrated, "system-migration");
+    const index = migratedSessions.findIndex((session) => session.id === migrated.id);
+    if (index >= 0) migratedSessions[index] = migrated;
+  }
+
+  return migratedSessions;
 }
 
 export async function getUsers(): Promise<User[]> {
