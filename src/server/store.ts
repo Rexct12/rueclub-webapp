@@ -86,6 +86,28 @@ function reviveFirestoreValue(value: unknown): unknown {
   return value;
 }
 
+function sanitizeFirestoreValue(value: unknown): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeFirestoreValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value)
+      .map(([key, item]) => [key, sanitizeFirestoreValue(item)] as const)
+      .filter(([, item]) => item !== undefined);
+
+    return Object.fromEntries(entries);
+  }
+
+  return value;
+}
+
 async function readCollection<T>(
   collection: CollectionName,
   parse: (value: unknown) => T,
@@ -123,7 +145,8 @@ async function saveDocument<T extends { id: string }>(
   }
 
   const { id, ...payload } = value;
-  await getAdminDb().collection(collection).doc(id).set(payload, { merge: true });
+  const sanitizedPayload = sanitizeFirestoreValue(payload) as Record<string, unknown>;
+  await getAdminDb().collection(collection).doc(id).set(sanitizedPayload, { merge: true });
   return value;
 }
 

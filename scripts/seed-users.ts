@@ -1,6 +1,9 @@
+import { loadEnvConfig } from "@next/env";
 import bcrypt from "bcryptjs";
 import { slugId } from "../src/lib/domain";
 import { upsertUser } from "../src/server/store";
+
+loadEnvConfig(process.cwd());
 
 async function main() {
   const raw = process.env.SEED_USERS ?? "Naufal:123456,Kolega:123456";
@@ -29,4 +32,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
