@@ -1112,6 +1112,26 @@ th {
   gap: 16px;
 }
 
+.session-sort-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.session-sort-field {
+  display: grid;
+  gap: 6px;
+  min-width: min(260px, 100%);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.session-sort-direction {
+  grid-template-columns: repeat(2, minmax(118px, 1fr));
+}
+
 .session-card,
 .empty-state,
 .admin-drawer {

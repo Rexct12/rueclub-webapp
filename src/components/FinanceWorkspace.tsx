@@ -21,6 +21,8 @@ type Toast = { type: "ok" | "error"; message: string };
 type View = "dashboard" | "input" | "ai" | "reports" | "data" | "settings";
 type TimeFormat = "12h" | "24h";
 type ColorMode = "light" | "dark";
+type SessionSortKey = "date" | "venue" | "profit";
+type SortDirection = "asc" | "desc";
 const dateFormatOptions = [
   ["yyyy-mm-dd", "YYYY-MM-DD"],
   ["dd-mm-yyyy", "DD-MM-YYYY"],
@@ -196,6 +198,8 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const [colorMode, setColorMode] = useState<ColorMode>(() => readColorMode());
   const [dateFormat, setDateFormat] = useState<DateFormat>(() => readDateFormat());
   const [sessionCodeFormat, setSessionCodeFormat] = useState<SessionCodeFormat>(() => readSessionCodeFormat());
+  const [sessionSortKey, setSessionSortKey] = useState<SessionSortKey>("date");
+  const [sessionSortDirection, setSessionSortDirection] = useState<SortDirection>("desc");
   const [isPending, startTransition] = useTransition();
   const today = todayInBangkok();
 
@@ -244,6 +248,28 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     }
     return map;
   }, [data.participantPayments]);
+  const venueSortCollator = useMemo(() => new Intl.Collator("id", { sensitivity: "base", numeric: true }), []);
+  const sortedActiveSessions = useMemo(() => {
+    const sessions = [...activeSessions];
+    sessions.sort((left, right) => {
+      let compare = 0;
+
+      if (sessionSortKey === "date") {
+        compare = left.date.localeCompare(right.date);
+      } else if (sessionSortKey === "venue") {
+        compare = venueSortCollator.compare(left.venue ?? "", right.venue ?? "");
+      } else {
+        const leftProfit = reportBySessionId.get(left.id)?.profit ?? 0;
+        const rightProfit = reportBySessionId.get(right.id)?.profit ?? 0;
+        compare = leftProfit - rightProfit;
+      }
+
+      if (compare === 0) compare = left.date.localeCompare(right.date);
+      if (compare === 0) compare = left.code.localeCompare(right.code);
+      return sessionSortDirection === "asc" ? compare : -compare;
+    });
+    return sessions;
+  }, [activeSessions, reportBySessionId, sessionSortDirection, sessionSortKey, venueSortCollator]);
 
   const editingSession = editingSessionId ? data.sessions.find((session) => session.id === editingSessionId) ?? null : null;
   const editingSessionPayments = useMemo(() => editingSessionId ? data.participantPayments.filter((payment) => payment.sessionId === editingSessionId) : [], [data.participantPayments, editingSessionId]);
@@ -787,8 +813,21 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
             <div><h2>Sesi Berjalan</h2><p>Pilih sesi untuk cek slot terisi, expense, profit, dan pembayaran yang belum masuk.</p></div>
             <div className="session-section-actions"><button className="secondary-button" onClick={() => goToView("reports")}>Lihat Laporan</button><button onClick={openWizard}>Buat Sesi Baru</button></div>
           </div>
+          <div className="session-sort-bar" role="group" aria-label="Kontrol urutan sesi berjalan">
+            <label className="session-sort-field">Urutkan berdasarkan
+              <select value={sessionSortKey} onChange={(event) => setSessionSortKey(event.target.value as SessionSortKey)}>
+                <option value="date">Tanggal</option>
+                <option value="venue">Venue</option>
+                <option value="profit">Profit</option>
+              </select>
+            </label>
+            <div className="segmented-control session-sort-direction" role="group" aria-label="Arah urutan sesi berjalan">
+              <button className={sessionSortDirection === "asc" ? "active" : ""} type="button" aria-pressed={sessionSortDirection === "asc"} onClick={() => setSessionSortDirection("asc")}>Ascending</button>
+              <button className={sessionSortDirection === "desc" ? "active" : ""} type="button" aria-pressed={sessionSortDirection === "desc"} onClick={() => setSessionSortDirection("desc")}>Descending</button>
+            </div>
+          </div>
           <div className="session-board">
-            {activeSessions.map((session) => {
+            {sortedActiveSessions.map((session) => {
               const sessionReport = reportBySessionId.get(session.id);
               const stats = paymentStatsBySession.get(session.id);
               const sessionTime = formatSessionTime(session.time, timeFormat) || "-";
