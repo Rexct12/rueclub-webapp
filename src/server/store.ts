@@ -31,6 +31,7 @@ import {
 } from "@/lib/domain";
 import { defaultAccounts } from "@/lib/defaults";
 import { buildMigratedSessionCodes, DEFAULT_SESSION_CODE_FORMAT } from "@/lib/session-code";
+import { syncParticipantSlotPriceWithSessionDefault } from "@/lib/session-slot-sync";
 import { getAdminDb, isFirebaseConfigured } from "@/server/firebase";
 
 type LocalStore = AppData & {
@@ -234,6 +235,40 @@ export async function upsertSession(session: Omit<Session, "id"> & { id?: string
 export async function deleteSession(id: string) {
   await deleteDocument("sessions", id);
   await deleteDocument("expenses", sessionCourtExpenseId(id));
+}
+
+export async function syncSessionParticipantSlotPricesWithDefaultChange(
+  sessionId: string,
+  oldDefaultSlotPrice: number,
+  newDefaultSlotPrice: number,
+  userId: string,
+) {
+  if (oldDefaultSlotPrice === newDefaultSlotPrice) return 0;
+
+  const participantPayments = await readCollection("participantPayments", participantPaymentSchema.parse);
+  const targetPayments = participantPayments.filter((payment) => payment.sessionId === sessionId);
+  if (!targetPayments.length) return 0;
+
+  const timestamp = nowIso();
+  let updatedCount = 0;
+
+  for (const payment of targetPayments) {
+    const synced = syncParticipantSlotPriceWithSessionDefault(payment, oldDefaultSlotPrice, newDefaultSlotPrice);
+    if (!synced.shouldUpdate) continue;
+
+    const value: ParticipantPayment = participantPaymentSchema.parse({
+      ...payment,
+      slotPrice: synced.slotPrice,
+      discount: synced.discount,
+      total: synced.total,
+      updatedAt: timestamp,
+      updatedBy: userId,
+    });
+    await saveDocument("participantPayments", value);
+    updatedCount += 1;
+  }
+
+  return updatedCount;
 }
 
 function sessionCourtExpenseId(sessionId: string) {

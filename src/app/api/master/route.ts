@@ -7,7 +7,14 @@ import {
   resolveSessionCodeForUpsert,
 } from "@/lib/session-code";
 import { getSessionUser } from "@/server/auth";
-import { deleteDocument, deleteSession, getAppData, upsertAccount, upsertSession } from "@/server/store";
+import {
+  deleteDocument,
+  deleteSession,
+  getAppData,
+  syncSessionParticipantSlotPricesWithDefaultChange,
+  upsertAccount,
+  upsertSession,
+} from "@/server/store";
 
 function jsonFromError(error: unknown, status = 500) {
   if (error instanceof ZodError) {
@@ -41,6 +48,9 @@ export async function POST(request: Request) {
 
     if (body.type === "session") {
       const data = await getAppData();
+      const previousSession = body.id
+        ? data.sessions.find((session) => session.id === String(body.id))
+        : undefined;
       const sessionCodeFormat = isSessionCodeFormat(body.sessionCodeFormat)
         ? body.sessionCodeFormat
         : DEFAULT_SESSION_CODE_FORMAT;
@@ -73,7 +83,17 @@ export async function POST(request: Request) {
         courtExpenseAccountId: body.courtExpenseAccountId,
         active: body.active ?? true,
       }, user.id);
-      return NextResponse.json({ session });
+
+      const syncedParticipantCount = previousSession
+        ? await syncSessionParticipantSlotPricesWithDefaultChange(
+          session.id,
+          previousSession.defaultSlotPrice,
+          session.defaultSlotPrice,
+          user.id,
+        )
+        : 0;
+
+      return NextResponse.json({ session, syncedParticipantCount });
     }
 
     return NextResponse.json({ error: "Unsupported master data type." }, { status: 400 });

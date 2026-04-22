@@ -317,7 +317,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
 
   function reloadAfter(message: string) {
     setToast({ type: "ok", message });
-    window.setTimeout(() => router.refresh(), 350);
+    window.setTimeout(() => router.refresh(), 1000);
   }
 
   function openWizard() {
@@ -422,8 +422,22 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       }
     }
     try {
-      await postJson("/api/master", payload);
-      reloadAfter(type === "account" ? "Akun ditambahkan." : "Sesi disimpan.");
+      if (type === "account") {
+        await postJson("/api/master", payload);
+        reloadAfter("Akun ditambahkan.");
+      } else {
+        const result = (await postJson("/api/master", payload)) as { syncedParticipantCount?: number };
+        const syncedCount = Number(result.syncedParticipantCount ?? 0);
+        if (payload.id) {
+          if (syncedCount > 0) {
+            reloadAfter(`Sesi diperbarui. ${syncedCount} peserta ikut disinkronkan ke harga slot default terbaru.`);
+          } else {
+            reloadAfter("Sesi diperbarui. Tidak ada slot peserta yang perlu disinkronkan.");
+          }
+        } else {
+          reloadAfter("Sesi disimpan.");
+        }
+      }
     } catch (error) {
       setToast({ type: "error", message: error instanceof Error ? error.message : "Gagal menyimpan." });
     } finally {
