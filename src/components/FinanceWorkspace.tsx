@@ -728,6 +728,13 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     await deleteTransaction(type, id);
   }
 
+  async function deleteSessionExpense(expense: Expense) {
+    const amountLabel = formatCurrency(expense.amount);
+    const expenseLabel = expense.description?.trim() || "expense ini";
+    if (!window.confirm(`Hapus ${expenseLabel} (${amountLabel}) dari sesi ini?`)) return;
+    await deleteTransaction("expense", expense.id);
+  }
+
   async function logout() {
     await fetch("/api/logout", { method: "POST" });
     window.location.href = "/login";
@@ -811,6 +818,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
           expenses={editingSessionExpenses}
           onClose={() => setEditingSessionId(null)}
           onDelete={deleteSession}
+          onExpenseDelete={deleteSessionExpense}
           onDeleteTransaction={deleteSessionTransaction}
           onExpenseCreate={createSessionExpense}
           onExpenseSave={updateExpense}
@@ -1066,6 +1074,7 @@ function SessionEditModal({
   isSaving,
   onClose,
   onDelete,
+  onExpenseDelete,
   onDeleteTransaction,
   onExpenseCreate,
   onExpenseSave,
@@ -1083,6 +1092,7 @@ function SessionEditModal({
   isSaving: boolean;
   onClose: () => void;
   onDelete: (id: string, code: string) => void;
+  onExpenseDelete: (expense: Expense) => void;
   onDeleteTransaction: (type: "participantPayment" | "expense" | "profitSharing", id: string, label: string) => void;
   onExpenseCreate: (event: FormEvent<HTMLFormElement>) => void;
   onExpenseSave: (event: FormEvent<HTMLFormElement>, id: string) => void;
@@ -1226,7 +1236,7 @@ function SessionEditModal({
                           <input name="receiptUrl" defaultValue={expense.receiptUrl ?? ""} aria-label="Link bukti" placeholder="Link bukti" />
                           <input name="notes" defaultValue={expense.notes ?? ""} aria-label="Catatan expense" placeholder="Catatan" />
                           <label className="checkbox compact-checkbox"><input name="reimbursed" type="checkbox" defaultChecked={expense.reimbursed} /> Reimburse</label>
-                          <div className="session-edit-row-actions"><button type="submit">Update</button><button className="table-button" type="button" onClick={() => onDeleteTransaction("expense", expense.id, `expense ${expense.description}`)}>Hapus</button></div>
+                          <div className="session-edit-row-actions"><button type="submit">Update</button><button className="table-button" type="button" onClick={() => onExpenseDelete(expense)} aria-label={`Hapus expense ${expense.description || "tanpa deskripsi"}`}>Hapus</button></div>
                         </form>
                       </td>
                     </tr>
