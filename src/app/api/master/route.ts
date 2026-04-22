@@ -3,8 +3,8 @@ import { ZodError } from "zod";
 import { parseRupiah } from "@/lib/format";
 import {
   DEFAULT_SESSION_CODE_FORMAT,
-  generateSessionCodeFromSessions,
   isSessionCodeFormat,
+  resolveSessionCodeForUpsert,
 } from "@/lib/session-code";
 import { getSessionUser } from "@/server/auth";
 import { deleteDocument, deleteSession, getAppData, upsertAccount, upsertSession } from "@/server/store";
@@ -44,16 +44,22 @@ export async function POST(request: Request) {
       const sessionCodeFormat = isSessionCodeFormat(body.sessionCodeFormat)
         ? body.sessionCodeFormat
         : DEFAULT_SESSION_CODE_FORMAT;
-      const code = String(body.code ?? "").trim() || generateSessionCodeFromSessions({
-        seed: {
-          date: String(body.date ?? ""),
-          venue: String(body.venue ?? ""),
-          code: "",
-        },
-        format: sessionCodeFormat,
-        sessions: data.sessions,
-        excludeSessionId: body.id ? String(body.id) : undefined,
-      });
+      let code: string;
+      try {
+        code = resolveSessionCodeForUpsert({
+          seed: {
+            date: String(body.date ?? ""),
+            venue: String(body.venue ?? ""),
+            code: String(body.code ?? "").trim(),
+          },
+          format: sessionCodeFormat,
+          sessions: data.sessions,
+          requestedCode: body.code,
+          sessionId: body.id ? String(body.id) : undefined,
+        });
+      } catch (error) {
+        return jsonFromError(error, 409);
+      }
 
       const session = await upsertSession({
         id: body.id,

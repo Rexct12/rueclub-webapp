@@ -224,7 +224,7 @@ export async function upsertAccount(account: Omit<Account, "id"> & { id?: string
 export async function upsertSession(session: Omit<Session, "id"> & { id?: string }, userId = "system") {
   const value = sessionSchema.parse({
     ...session,
-    id: session.id ?? slugId(session.code),
+    id: session.id ?? crypto.randomUUID(),
   });
   const saved = await saveDocument("sessions", value);
   await syncSessionCourtExpense(saved, userId);

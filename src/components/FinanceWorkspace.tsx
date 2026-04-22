@@ -185,6 +185,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const [wizardStep, setWizardStep] = useState<Step>(1);
   const [wizardError, setWizardError] = useState<string | null>(null);
   const [savingWizard, setSavingWizard] = useState(false);
+  const [sessionCodeManuallyEdited, setSessionCodeManuallyEdited] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [participantSessionId, setParticipantSessionId] = useState<string | null>(null);
   const [detailMode, setDetailMode] = useState<"wizard" | "quick" | null>(null);
@@ -299,10 +300,35 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     setWizardStep(1);
     setWizardError(null);
     setSavingWizard(false);
+    setSessionCodeManuallyEdited(false);
     setSessionDraft({ ...initialDraft, code: initialCode });
     setInitialExpenses(makeExpenses(firstAccountId));
     setWizardParticipants(makeParticipants(8, "0", firstAccountId));
     setWizardOpen(true);
+  }
+
+  function onWizardSessionChange(nextSession: SessionDraft) {
+    setSessionDraft((current) => {
+      const sourceChanged = nextSession.date !== current.date || nextSession.venue !== current.venue;
+      if (!sourceChanged || sessionCodeManuallyEdited) {
+        return nextSession;
+      }
+
+      return {
+        ...nextSession,
+        code: generateCodeByDraft(nextSession),
+      };
+    });
+  }
+
+  function onWizardSessionCodeInput(code: string) {
+    setSessionCodeManuallyEdited(true);
+    setSessionDraft((current) => ({ ...current, code }));
+  }
+
+  function onWizardSessionCodeGenerate() {
+    setSessionCodeManuallyEdited(false);
+    setSessionDraft((current) => ({ ...current, code: generateCodeByDraft(current) }));
   }
 
   function nextStep() {
@@ -313,6 +339,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     setWizardError(null);
     if (wizardStep === 1) {
       if (!sessionDraft.code.trim()) {
+        setSessionCodeManuallyEdited(false);
         setSessionDraft((current) => ({ ...current, code: generateCodeByDraft(current) }));
       }
       setWizardParticipants((rows) => rows.map((row) => row.slotPrice && row.slotPrice !== "0" ? row : { ...row, slotPrice: sessionDraft.defaultSlotPrice || "0" }));
@@ -777,7 +804,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         <SettingsPanel colorMode={colorMode} dateFormat={dateFormat} onColorModeChange={setColorMode} onDateFormatChange={setDateFormat} onSessionCodeFormatChange={setSessionCodeFormat} onTimeFormatChange={setTimeFormat} sessionCodeFormat={sessionCodeFormat} timeFormat={timeFormat} />
       </section>
 
-      {wizardOpen ? <SessionWizard accountOptions={accountOptions} dateFormat={dateFormat} error={wizardError} expenses={initialExpenses} isSaving={savingWizard} onClose={() => setWizardOpen(false)} onExpenseChange={setInitialExpenses} onParticipantDetail={(id) => openDetail("wizard", id)} onParticipantsChange={setWizardParticipants} onSave={saveWizard} onSessionChange={setSessionDraft} onSessionCodeGenerate={() => setSessionDraft((current) => ({ ...current, code: generateCodeByDraft(current) }))} onStepBack={() => { setWizardError(null); setWizardStep((step) => Math.max(1, step - 1) as Step); }} onStepNext={nextStep} onStepSelect={goToWizardStep} participants={wizardParticipants} session={sessionDraft} step={wizardStep} timeFormat={timeFormat} /> : null}
+      {wizardOpen ? <SessionWizard accountOptions={accountOptions} dateFormat={dateFormat} error={wizardError} expenses={initialExpenses} isSaving={savingWizard} onClose={() => setWizardOpen(false)} onExpenseChange={setInitialExpenses} onParticipantDetail={(id) => openDetail("wizard", id)} onParticipantsChange={setWizardParticipants} onSave={saveWizard} onSessionChange={onWizardSessionChange} onSessionCodeGenerate={onWizardSessionCodeGenerate} onSessionCodeInput={onWizardSessionCodeInput} onStepBack={() => { setWizardError(null); setWizardStep((step) => Math.max(1, step - 1) as Step); }} onStepNext={nextStep} onStepSelect={goToWizardStep} participants={wizardParticipants} session={sessionDraft} step={wizardStep} timeFormat={timeFormat} /> : null}
       {editingSession ? (
         <SessionEditModal
           accountOptions={accountOptions}
@@ -817,6 +844,7 @@ function SessionWizard({
   onSave,
   onSessionChange,
   onSessionCodeGenerate,
+  onSessionCodeInput,
   onStepBack,
   onStepNext,
   onStepSelect,
@@ -837,6 +865,7 @@ function SessionWizard({
   onSave: () => void;
   onSessionChange: (session: SessionDraft) => void;
   onSessionCodeGenerate: () => void;
+  onSessionCodeInput: (code: string) => void;
   onStepBack: () => void;
   onStepNext: () => void;
   onStepSelect: (step: Step) => void;
@@ -864,7 +893,7 @@ function SessionWizard({
           <div className="wizard-grid">
             <label>Tanggal sesi<input type="date" value={session.date} onChange={(event) => onSessionChange({ ...session, date: event.target.value })} required /></label>
             <label>Jam sesi<input type="time" value={session.time} onChange={(event) => onSessionChange({ ...session, time: event.target.value })} /></label>
-            <label>Kode sesi<div className="session-code-input"><input value={session.code} onChange={(event) => onSessionChange({ ...session, code: event.target.value })} placeholder="venuecode-mmyy-nnn" required /><button type="button" className="secondary-button" onClick={onSessionCodeGenerate}>Auto</button></div></label>
+            <label>Kode sesi<div className="session-code-input"><input value={session.code} onChange={(event) => onSessionCodeInput(event.target.value)} placeholder="venuecode-mmyy-nnn" required /><button type="button" className="secondary-button" onClick={onSessionCodeGenerate}>Auto</button></div></label>
             <label>Venue<input value={session.venue} onChange={(event) => onSessionChange({ ...session, venue: event.target.value })} placeholder="Kaya Padel" /></label>
             <label>Harga slot default<MoneyInput value={session.defaultSlotPrice} onValueChange={(value) => onSessionChange({ ...session, defaultSlotPrice: value })} /></label>
             <label>Harga lapangan<MoneyInput value={session.courtPrice} onValueChange={(value) => onSessionChange({ ...session, courtPrice: value })} disabled={session.courtFree} /></label>

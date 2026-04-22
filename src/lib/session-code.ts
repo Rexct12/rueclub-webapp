@@ -93,6 +93,44 @@ export function generateSessionCodeFromSessions(input: {
   });
 }
 
+export function resolveSessionCodeForUpsert(input: {
+  seed: SessionCodeSeed;
+  format: SessionCodeFormat;
+  sessions: SessionLike[];
+  requestedCode?: string;
+  sessionId?: string;
+}) {
+  const requestedCode = String(input.requestedCode ?? "").trim();
+  const isCodeTaken = (code: string) =>
+    input.sessions.some(
+      (session) => session.id !== input.sessionId && session.code.toLowerCase() === code.toLowerCase(),
+    );
+
+  if (!requestedCode) {
+    return generateSessionCodeFromSessions({
+      seed: input.seed,
+      format: input.format,
+      sessions: input.sessions,
+      excludeSessionId: input.sessionId,
+    });
+  }
+
+  if (isCodeTaken(requestedCode)) {
+    if (input.sessionId) {
+      throw new Error("Kode sesi sudah dipakai sesi lain.");
+    }
+
+    return generateSessionCodeFromSessions({
+      seed: { ...input.seed, code: requestedCode },
+      format: input.format,
+      sessions: input.sessions,
+      excludeSessionId: input.sessionId,
+    });
+  }
+
+  return requestedCode;
+}
+
 export function buildMigratedSessionCodes(sessions: SessionLike[], format: SessionCodeFormat = DEFAULT_SESSION_CODE_FORMAT) {
   const sorted = [...sessions].sort((a, b) => {
     const byDate = a.date.localeCompare(b.date);
