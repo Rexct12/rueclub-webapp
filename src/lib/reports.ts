@@ -8,6 +8,10 @@ import type {
   Session,
 } from "@/lib/domain";
 
+function isCashExpense(expense: Expense) {
+  return expense.intent !== "courtMemberUsage";
+}
+
 export type AccountBalance = {
   accountId: string;
   accountName: string;
@@ -71,16 +75,17 @@ function byAccount<T extends { accountId?: string; amount?: number; total?: numb
 
 export function buildDashboardReport(data: AppData): DashboardReport {
   const profitSharings = data.profitSharings ?? [];
+  const cashExpenses = data.expenses.filter(isCashExpense);
   const cashInFromPayments = sum(data.participantPayments.map(paidIncome));
   const cashInFromCapital = sum(data.capitalDeposits.map((deposit) => deposit.amount));
   const cashIn = cashInFromPayments + cashInFromCapital;
-  const expenseTotal = sum(data.expenses.map((expense) => expense.amount));
+  const expenseTotal = sum(cashExpenses.map((expense) => expense.amount));
   const profitSharingTotal = sum(profitSharings.map((sharing) => sharing.amount));
   const openingBalance = sum(data.accounts.map((account) => account.openingBalance));
   const currentBalance = openingBalance + cashIn - expenseTotal - profitSharingTotal;
 
   const accountBalances = data.accounts.map((account) =>
-    buildAccountBalance(account, data.participantPayments, data.expenses, data.capitalDeposits, profitSharings),
+    buildAccountBalance(account, data.participantPayments, cashExpenses, data.capitalDeposits, profitSharings),
   );
 
   const sessionReports = data.sessions
@@ -88,7 +93,7 @@ export function buildDashboardReport(data: AppData): DashboardReport {
     .sort((a, b) => b.date.localeCompare(a.date) || a.code.localeCompare(b.code));
 
   const expenseByCategory = Object.entries(
-    data.expenses.reduce<Record<string, number>>((acc, expense) => {
+    cashExpenses.reduce<Record<string, number>>((acc, expense) => {
       acc[expense.category] = (acc[expense.category] ?? 0) + expense.amount;
       return acc;
     }, {}),
@@ -96,7 +101,7 @@ export function buildDashboardReport(data: AppData): DashboardReport {
     .map(([category, amount]) => ({ category, amount }))
     .sort((a, b) => b.amount - a.amount);
 
-  const monthlySummary = buildMonthlySummary(data.participantPayments, data.expenses, profitSharings);
+  const monthlySummary = buildMonthlySummary(data.participantPayments, cashExpenses, profitSharings);
   const profitLoss = sum(sessionReports.map((session) => session.profit));
 
   return {

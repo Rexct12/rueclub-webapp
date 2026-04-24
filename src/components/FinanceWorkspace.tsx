@@ -3,7 +3,7 @@
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { Account, AiDraft, AppData, Expense, ParticipantPayment, ProfitSharing, Session } from "@/lib/domain";
+import type { Account, AiDraft, AppData, CourtMemberPackage, Expense, ParticipantPayment, ProfitSharing, Session } from "@/lib/domain";
 import { expenseCategories, paymentCategories, paymentMethods, paymentStatuses, profitSharingCalculationTypes, todayInBangkok } from "@/lib/domain";
 import { formatCurrency, formatNumber, parseRupiah } from "@/lib/format";
 import { jsonErrorMessage, readResponseJson } from "@/lib/fetch-json";
@@ -47,6 +47,7 @@ const navItems: Array<{ id: View; label: string; helper: string }> = [
 const exportLinks = [
   ["participant-payments", "Pemasukan"],
   ["expenses", "Expense"],
+  ["court-member-packages", "Paket Member"],
   ["capital-deposits", "Modal Titipan"],
   ["profit-sharings", "Bagi Hasil"],
   ["sessions", "Sesi"],
@@ -179,6 +180,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const router = useRouter();
   const [toast, setToast] = useState<Toast | null>(null);
   const [savingMasterType, setSavingMasterType] = useState<"account" | "session" | null>(null);
+  const [savingCourtMemberPackage, setSavingCourtMemberPackage] = useState(false);
   const [savingTransactionType, setSavingTransactionType] = useState<"expense" | "capitalDeposit" | null>(null);
   const transactionInFlight = useRef<"expense" | "capitalDeposit" | null>(null);
   const [activeView, setActiveView] = useState<View>(() => viewFromHash());
@@ -222,8 +224,21 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
 
   const activeAccounts = useMemo(() => data.accounts.filter((account) => account.active), [data.accounts]);
   const activeSessions = useMemo(() => data.sessions.filter((session) => session.active), [data.sessions]);
+  const activeCourtMemberPackages = useMemo(
+    () => data.courtMemberPackages.filter((item) => item.active),
+    [data.courtMemberPackages],
+  );
   const accountOptions = useMemo(() => activeAccounts.map((account): [string, string] => [account.id, account.name]), [activeAccounts]);
   const sessionOptions = useMemo(() => activeSessions.map((session): [string, string] => [session.id, session.code]), [activeSessions]);
+  const courtMemberPackageOptions = useMemo(
+    () => [
+      ["", "Tanpa paket member"] as [string, string],
+      ...activeCourtMemberPackages.map(
+        (item): [string, string] => [item.id, `${item.name} (${item.venue})`],
+      ),
+    ],
+    [activeCourtMemberPackages],
+  );
   const firstAccountId = activeAccounts[0]?.id ?? "";
 
   const [sessionDraft, setSessionDraft] = useState<SessionDraft>(() => ({ date: today, time: "", code: "", venue: "", defaultSlotPrice: "0", courtPrice: "0", courtFree: false, courtExpenseAccountId: firstAccountId }));
@@ -399,6 +414,8 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         courtPrice: money(String(formData.get("courtPrice") ?? 0)),
         courtFree: formData.get("courtFree") === "on",
         courtExpenseAccountId: formData.get("courtExpenseAccountId") || undefined,
+        courtMemberPackageId: formData.get("courtMemberPackageId") || undefined,
+        memberUsageHours: Number(formData.get("memberUsageHours") ?? 0),
         active: formData.get("active") !== "false",
         sessionCodeFormat,
       };
@@ -442,6 +459,32 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       setToast({ type: "error", message: error instanceof Error ? error.message : "Gagal menyimpan." });
     } finally {
       setSavingMasterType(null);
+    }
+  }
+
+  async function submitCourtMemberPackage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (savingCourtMemberPackage) return;
+    setSavingCourtMemberPackage(true);
+    const base = Object.fromEntries(new FormData(event.currentTarget).entries());
+    try {
+      await postJson("/api/master", {
+        type: "courtMemberPackage",
+        purchaseDate: base.purchaseDate,
+        name: base.name,
+        venue: base.venue,
+        totalHours: Number(base.totalHours ?? 0),
+        totalAmount: money(String(base.totalAmount ?? 0)),
+        expenseAccountId: base.expenseAccountId,
+        notes: base.notes,
+        active: true,
+      });
+      event.currentTarget.reset();
+      reloadAfter("Paket member disimpan.");
+    } catch (error) {
+      setToast({ type: "error", message: error instanceof Error ? error.message : "Gagal menyimpan paket member." });
+    } finally {
+      setSavingCourtMemberPackage(false);
     }
   }
 
@@ -822,7 +865,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         </section>
 
         <section className="session-workspace" id="input">
-          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} onDeleteAccount={deleteAccount} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} /></details>
+          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} courtMemberPackageOptions={courtMemberPackageOptions} packageRows={activeCourtMemberPackages} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} savingCourtMemberPackage={savingCourtMemberPackage} onDeleteAccount={deleteAccount} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} onSaveCourtMemberPackage={submitCourtMemberPackage} /></details>
           <div className="section-head horizontal-head">
             <div><h2>Sesi Berjalan</h2><p>Pilih sesi untuk cek slot terisi, expense, profit, dan pembayaran yang belum masuk.</p></div>
             <div className="session-section-actions"><button className="secondary-button" onClick={() => goToView("reports")}>Lihat Laporan</button><button onClick={openWizard}>Buat Sesi Baru</button></div>
@@ -881,6 +924,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
           onProfitSharingCreate={createProfitSharing}
           onProfitSharingSave={updateProfitSharing}
           onSave={submitMaster}
+          courtMemberPackageOptions={courtMemberPackageOptions}
           payments={editingSessionPayments}
           profitSharings={editingSessionProfitSharings}
           session={editingSession}
@@ -1123,6 +1167,7 @@ function ParticipantDetailModal({ participant, onChange, onClose }: { participan
 
 function SessionEditModal({
   accountOptions,
+  courtMemberPackageOptions,
   expenses,
   isSaving,
   onClose,
@@ -1141,6 +1186,7 @@ function SessionEditModal({
   session,
 }: {
   accountOptions: Array<[string, string]>;
+  courtMemberPackageOptions: Array<[string, string]>;
   expenses: Expense[];
   isSaving: boolean;
   onClose: () => void;
@@ -1214,6 +1260,8 @@ function SessionEditModal({
               <label>Harga slot default<MoneyInput name="defaultSlotPrice" defaultValue={session.defaultSlotPrice} /></label>
               <label>Harga lapangan<MoneyInput name="courtPrice" defaultValue={session.courtPrice} /></label>
               <label>Akun biaya lapangan<select name="courtExpenseAccountId" defaultValue={session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? ""}>{accountOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Paket member<Select name="courtMemberPackageId" options={courtMemberPackageOptions} value={session.courtMemberPackageId ?? ""} /></label>
+              <label>Jam pakai member<input name="memberUsageHours" type="number" min={0} step="0.25" defaultValue={session.memberUsageHours ?? 0} /></label>
               <label>Status<select name="active" defaultValue={String(session.active)}><option value="true">Aktif</option><option value="false">Nonaktif</option></select></label>
               <label className="checkbox inline-checkbox"><input name="courtFree" type="checkbox" defaultChecked={session.courtFree} /> Lapangan free</label>
               {isSaving ? <p className="inline-status wide-field">Menyimpan perubahan sesi...</p> : null}
@@ -1524,9 +1572,35 @@ function ParticipantAppendModal({ accountOptions, onClose, onDetail, onParticipa
   );
 }
 
-function ManualAdminForms({ accounts, accountOptions, onDeleteAccount, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today }: { accounts: Account[]; accountOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string }) {
+function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions, onDeleteAccount, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today, onSaveCourtMemberPackage, savingCourtMemberPackage, packageRows }: { accounts: Account[]; accountOptions: Array<[string, string]>; courtMemberPackageOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string; onSaveCourtMemberPackage: (event: FormEvent<HTMLFormElement>) => void; savingCourtMemberPackage: boolean; packageRows: CourtMemberPackage[] }) {
   return (
     <div className="manual-admin-grid">
+      <FormPanel title="Beli Paket Member Court">
+        <p className="form-help">Catat pembelian paket member lapangan. Sistem akan membuat expense pembelian paket dan kamu bisa alokasikan pemakaian jam ke sesi.</p>
+        <form onSubmit={onSaveCourtMemberPackage} className="form-grid">
+          <input name="purchaseDate" type="date" defaultValue={today} required />
+          <input name="name" placeholder="Nama paket (contoh: Paket Gold April)" required />
+          <input name="venue" placeholder="Venue/lapangan" required />
+          <input name="totalHours" type="number" min={0.25} step="0.25" placeholder="Total jam" required />
+          <MoneyInput name="totalAmount" placeholder="Total pembelian" required />
+          <Select name="expenseAccountId" options={accountOptions} required />
+          <textarea name="notes" placeholder="Catatan (opsional)" />
+          <button type="submit" disabled={savingCourtMemberPackage}>{savingCourtMemberPackage ? "Menyimpan..." : "Simpan Paket Member"}</button>
+        </form>
+        <div className="account-delete-list">
+          {packageRows.map((row) => {
+            const rate = row.totalHours > 0 ? Math.round(row.totalAmount / row.totalHours) : 0;
+            return (
+              <div className="account-delete-row" key={row.id}>
+                <span>{row.name} - {row.venue}</span>
+                <small>{formatCurrency(row.totalAmount)} / {row.totalHours} jam ({formatCurrency(rate)}/jam)</small>
+              </div>
+            );
+          })}
+          {!packageRows.length ? <p className="empty-note">Belum ada paket member aktif.</p> : null}
+        </div>
+      </FormPanel>
+
       <FormPanel title="Tambah Modal">
         <p className="form-help">Gunakan ini untuk mencatat modal masuk ke rekening/kas RueClub. Ini akan menambah saldo akun tujuan.</p>
         <form onSubmit={(event) => onSaveTransaction(event, "capitalDeposit")} className="form-grid">
@@ -1553,6 +1627,8 @@ function ManualAdminForms({ accounts, accountOptions, onDeleteAccount, onSaveMas
           <MoneyInput name="defaultSlotPrice" placeholder="Harga slot default" defaultValue={0} />
           <MoneyInput name="courtPrice" placeholder="Harga lapangan" defaultValue={0} />
           <Select name="courtExpenseAccountId" options={accountOptions} />
+          <Select name="courtMemberPackageId" options={courtMemberPackageOptions} />
+          <input name="memberUsageHours" type="number" min={0} step="0.25" placeholder="Jam pakai member (opsional)" defaultValue={0} />
           <label className="checkbox"><input name="courtFree" type="checkbox" /> Lapangan free</label>
           <button type="submit">Simpan Sesi</button>
         </form>

@@ -5,6 +5,8 @@ import {
   capitalDepositInputSchema,
   capitalDepositSchema,
   computePaymentTotal,
+  courtMemberPackageInputSchema,
+  courtMemberPackageSchema,
   expenseInputSchema,
   expenseSchema,
   isRealMoneyAccount,
@@ -19,6 +21,8 @@ import {
   type CapitalDeposit,
   type CapitalDepositInput,
   type CollectionName,
+  type CourtMemberPackage,
+  type CourtMemberPackageInput,
   type Expense,
   type ExpenseInput,
   type ParticipantPayment,
@@ -50,6 +54,7 @@ function emptyLocalStore(): LocalStore {
     sessions: [],
     participantPayments: [],
     expenses: [],
+    courtMemberPackages: [],
     capitalDeposits: [],
     profitSharings: [],
     users: [],
@@ -165,11 +170,12 @@ export async function deleteDocument(collection: CollectionName, id: string) {
 }
 
 export async function getAppData(): Promise<AppData> {
-  const [accounts, sessions, participantPayments, expenses, capitalDeposits, profitSharings] = await Promise.all([
+  const [accounts, sessions, participantPayments, expenses, courtMemberPackages, capitalDeposits, profitSharings] = await Promise.all([
     readCollection("accounts", accountSchema.parse),
     readCollection("sessions", sessionSchema.parse),
     readCollection("participantPayments", participantPaymentSchema.parse),
     readCollection("expenses", expenseSchema.parse),
+    readCollection("courtMemberPackages", courtMemberPackageSchema.parse),
     readCollection("capitalDeposits", capitalDepositSchema.parse),
     readCollection("profitSharings", profitSharingSchema.parse),
   ]);
@@ -181,6 +187,7 @@ export async function getAppData(): Promise<AppData> {
     sessions: migratedSessions,
     participantPayments,
     expenses,
+    courtMemberPackages,
     capitalDeposits,
     profitSharings,
   };
@@ -278,6 +285,44 @@ function sessionCourtExpenseId(sessionId: string) {
 async function syncSessionCourtExpense(session: Session, userId: string) {
   const expenseId = sessionCourtExpenseId(session.id);
 
+  if (session.courtMemberPackageId && session.memberUsageHours > 0) {
+    const memberPackage = (await readCollection("courtMemberPackages", courtMemberPackageSchema.parse)).find(
+      (row) => row.id === session.courtMemberPackageId,
+    );
+
+    if (!memberPackage) {
+      await deleteDocument("expenses", expenseId);
+      return;
+    }
+
+    const hourlyRate = memberPackage.totalAmount / memberPackage.totalHours;
+    const calculatedAmount = Math.round(hourlyRate * session.memberUsageHours);
+    const timestamp = nowIso();
+    const existing = (await readCollection("expenses", expenseSchema.parse)).find(
+      (expense) => expense.id === expenseId,
+    );
+
+    const value: Expense = expenseSchema.parse({
+      id: expenseId,
+      date: session.date,
+      description: `Court Member Usage - ${session.code}`,
+      category: "Court",
+      sessionId: session.id,
+      amount: calculatedAmount,
+      accountId: memberPackage.expenseAccountId,
+      intent: "courtMemberUsage",
+      notes: `Auto-generated from member package ${memberPackage.name} (${session.memberUsageHours} jam)`,
+      reimbursed: false,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+      createdBy: existing?.createdBy ?? userId,
+      updatedBy: userId,
+    });
+
+    await saveDocument("expenses", value);
+    return;
+  }
+
   if (session.courtFree || session.courtPrice <= 0 || !session.courtExpenseAccountId) {
     await deleteDocument("expenses", expenseId);
     return;
@@ -295,6 +340,7 @@ async function syncSessionCourtExpense(session: Session, userId: string) {
     sessionId: session.id,
     amount: session.courtPrice,
     accountId: session.courtExpenseAccountId,
+    intent: "operational",
     notes: "Auto-generated from session court price",
     reimbursed: false,
     createdAt: existing?.createdAt ?? timestamp,
@@ -419,6 +465,54 @@ export async function createCapitalDeposit(input: CapitalDepositInput, userId: s
     updatedBy: userId,
   });
   return saveDocument("capitalDeposits", value);
+}
+
+export async function upsertCourtMemberPackage(
+  input: Omit<CourtMemberPackageInput, "active"> & { active?: boolean; id?: string },
+  userId: string,
+) {
+  const parsed = courtMemberPackageInputSchema.parse(input);
+  const timestamp = nowIso();
+  const existing = input.id
+    ? (await readCollection("courtMemberPackages", courtMemberPackageSchema.parse)).find(
+      (row) => row.id === input.id,
+    )
+    : undefined;
+
+  const value: CourtMemberPackage = courtMemberPackageSchema.parse({
+    ...parsed,
+    id: input.id ?? crypto.randomUUID(),
+    active: input.active ?? true,
+    createdAt: existing?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+    createdBy: existing?.createdBy ?? userId,
+    updatedBy: userId,
+  });
+
+  const saved = await saveDocument("courtMemberPackages", value);
+
+  const purchaseExpenseId = `court-member-purchase-${saved.id}`;
+  const existingPurchaseExpense = (await readCollection("expenses", expenseSchema.parse)).find(
+    (expense) => expense.id === purchaseExpenseId,
+  );
+  const purchaseExpense: Expense = expenseSchema.parse({
+    id: purchaseExpenseId,
+    date: saved.purchaseDate,
+    description: `Beli paket member - ${saved.name}`,
+    category: "Court",
+    amount: saved.totalAmount,
+    accountId: saved.expenseAccountId,
+    intent: "courtMemberPurchase",
+    notes: saved.notes,
+    reimbursed: false,
+    createdAt: existingPurchaseExpense?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+    createdBy: existingPurchaseExpense?.createdBy ?? userId,
+    updatedBy: userId,
+  });
+  await saveDocument("expenses", purchaseExpense);
+
+  return saved;
 }
 
 export function backendLabel() {
