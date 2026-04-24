@@ -1,8 +1,21 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { parseRupiah } from "@/lib/format";
+import {
+  DEFAULT_SESSION_CODE_FORMAT,
+  isSessionCodeFormat,
+  resolveSessionCodeForUpsert,
+} from "@/lib/session-code";
 import { getSessionUser } from "@/server/auth";
-import { deleteDocument, deleteSession, getAppData, upsertAccount, upsertSession } from "@/server/store";
+import {
+  deleteDocument,
+  deleteSession,
+  getAppData,
+  syncSessionParticipantSlotPricesWithDefaultChange,
+  upsertAccount,
+  upsertCourtMemberPackage,
+  upsertSession,
+} from "@/server/store";
 
 function jsonFromError(error: unknown, status = 500) {
   if (error instanceof ZodError) {
@@ -35,19 +48,70 @@ export async function POST(request: Request) {
     }
 
     if (body.type === "session") {
+      const data = await getAppData();
+      const previousSession = body.id
+        ? data.sessions.find((session) => session.id === String(body.id))
+        : undefined;
+      const sessionCodeFormat = isSessionCodeFormat(body.sessionCodeFormat)
+        ? body.sessionCodeFormat
+        : DEFAULT_SESSION_CODE_FORMAT;
+      let code: string;
+      try {
+        code = resolveSessionCodeForUpsert({
+          seed: {
+            date: String(body.date ?? ""),
+            venue: String(body.venue ?? ""),
+            code: String(body.code ?? "").trim(),
+          },
+          format: sessionCodeFormat,
+          sessions: data.sessions,
+          requestedCode: body.code,
+          sessionId: body.id ? String(body.id) : undefined,
+        });
+      } catch (error) {
+        return jsonFromError(error, 409);
+      }
+
       const session = await upsertSession({
         id: body.id,
         date: body.date,
         time: body.time,
-        code: body.code,
+        code,
         venue: body.venue,
         defaultSlotPrice: parseRupiah(body.defaultSlotPrice),
         courtPrice: parseRupiah(body.courtPrice),
         courtFree: Boolean(body.courtFree),
         courtExpenseAccountId: body.courtExpenseAccountId,
+        courtMemberPackageId: body.courtMemberPackageId,
+        memberUsageHours: Number(body.memberUsageHours ?? 0),
         active: body.active ?? true,
       }, user.id);
-      return NextResponse.json({ session });
+
+      const syncedParticipantCount = previousSession
+        ? await syncSessionParticipantSlotPricesWithDefaultChange(
+          session.id,
+          previousSession.defaultSlotPrice,
+          session.defaultSlotPrice,
+          user.id,
+        )
+        : 0;
+
+      return NextResponse.json({ session, syncedParticipantCount });
+    }
+
+    if (body.type === "courtMemberPackage") {
+      const row = await upsertCourtMemberPackage({
+        id: body.id,
+        purchaseDate: body.purchaseDate,
+        name: body.name,
+        venue: body.venue,
+        totalHours: Number(body.totalHours ?? 0),
+        totalAmount: parseRupiah(body.totalAmount),
+        expenseAccountId: body.expenseAccountId,
+        notes: body.notes,
+        active: body.active ?? true,
+      }, user.id);
+      return NextResponse.json({ row });
     }
 
     return NextResponse.json({ error: "Unsupported master data type." }, { status: 400 });
@@ -82,7 +146,8 @@ export async function DELETE(request: Request) {
       data.participantPayments.some((payment) => payment.accountId === id) ||
       data.expenses.some((expense) => expense.accountId === id) ||
       data.capitalDeposits.some((deposit) => deposit.accountId === id) ||
-      data.sessions.some((session) => session.courtExpenseAccountId === id);
+      data.sessions.some((session) => session.courtExpenseAccountId === id) ||
+      data.courtMemberPackages.some((pkg) => pkg.expenseAccountId === id);
 
     if (accountInUse) {
       return NextResponse.json(
@@ -92,6 +157,20 @@ export async function DELETE(request: Request) {
     }
 
     await deleteDocument("accounts", id);
+    return NextResponse.json({ ok: true });
+  }
+
+  if (type === "courtMemberPackage") {
+    const data = await getAppData();
+    const packageInUse = data.sessions.some((session) => session.courtMemberPackageId === id);
+    if (packageInUse) {
+      return NextResponse.json(
+        { error: "Paket member sudah dipakai di sesi, jadi tidak bisa dihapus." },
+        { status: 409 },
+      );
+    }
+    await deleteDocument("courtMemberPackages", id);
+    await deleteDocument("expenses", `court-member-purchase-${id}`);
     return NextResponse.json({ ok: true });
   }
 

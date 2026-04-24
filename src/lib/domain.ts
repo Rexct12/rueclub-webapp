@@ -5,6 +5,7 @@ export const paymentCategories = ["Teman", "Umum", "Owner"] as const;
 export const paymentStatuses = ["Lunas", "Belum", "Free"] as const;
 export const paymentMethods = ["Transfer", "Cash"] as const;
 export const profitSharingCalculationTypes = ["fixed", "percent"] as const;
+export const expenseIntents = ["operational", "courtMemberPurchase", "courtMemberUsage"] as const;
 export const expenseCategories = [
   "Biaya Admin TF",
   "Biaya Compliment",
@@ -57,6 +58,8 @@ export const sessionSchema = z.object({
   courtPrice: moneySchema.default(0),
   courtFree: z.boolean().default(false),
   courtExpenseAccountId: optionalText,
+  courtMemberPackageId: optionalText,
+  memberUsageHours: z.coerce.number().finite().min(0).default(0),
   active: z.boolean().default(true),
 });
 
@@ -142,9 +145,21 @@ export const expenseInputSchema = z.object({
   sessionId: optionalText,
   amount: moneySchema,
   accountId: requiredText,
+  intent: z.enum(expenseIntents).default("operational"),
   notes: optionalText,
   reimbursed: z.boolean().default(false),
   receiptUrl: optionalText,
+});
+
+export const courtMemberPackageInputSchema = z.object({
+  purchaseDate: dateStringSchema,
+  name: requiredText,
+  venue: requiredText,
+  totalHours: z.coerce.number().finite().positive(),
+  totalAmount: moneySchema,
+  expenseAccountId: requiredText,
+  notes: optionalText,
+  active: z.boolean().default(true),
 });
 
 export const capitalDepositInputSchema = z.object({
@@ -198,6 +213,14 @@ export const expenseSchema = expenseInputSchema.extend({
   updatedBy: z.string(),
 });
 
+export const courtMemberPackageSchema = courtMemberPackageInputSchema.extend({
+  id: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  createdBy: z.string(),
+  updatedBy: z.string(),
+});
+
 export const capitalDepositSchema = capitalDepositInputSchema.extend({
   id: z.string(),
   createdAt: z.string(),
@@ -235,10 +258,12 @@ export type Session = z.infer<typeof sessionSchema>;
 export type User = z.infer<typeof userSchema>;
 export type ParticipantPaymentInput = z.infer<typeof participantPaymentInputSchema>;
 export type ExpenseInput = z.infer<typeof expenseInputSchema>;
+export type CourtMemberPackageInput = z.infer<typeof courtMemberPackageInputSchema>;
 export type CapitalDepositInput = z.infer<typeof capitalDepositInputSchema>;
 export type ProfitSharingInput = z.infer<typeof profitSharingInputSchema>;
 export type ParticipantPayment = z.infer<typeof participantPaymentSchema>;
 export type Expense = z.infer<typeof expenseSchema>;
+export type CourtMemberPackage = z.infer<typeof courtMemberPackageSchema>;
 export type CapitalDeposit = z.infer<typeof capitalDepositSchema>;
 export type ProfitSharing = z.infer<typeof profitSharingSchema>;
 export type AiDraft = z.infer<typeof aiDraftSchema>;
@@ -249,6 +274,7 @@ export type AppData = {
   sessions: Session[];
   participantPayments: ParticipantPayment[];
   expenses: Expense[];
+  courtMemberPackages: CourtMemberPackage[];
   capitalDeposits: CapitalDeposit[];
   profitSharings: ProfitSharing[];
 };
@@ -258,6 +284,7 @@ export type CollectionName =
   | "sessions"
   | "participantPayments"
   | "expenses"
+  | "courtMemberPackages"
   | "capitalDeposits"
   | "profitSharings"
   | "users";

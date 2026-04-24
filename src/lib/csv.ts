@@ -49,7 +49,7 @@ export function exportCollectionCsv(type: string, data: AppData) {
 
   if (type === "expenses") {
     return toCsv(
-      ["date", "description", "category", "sessionId", "amount", "accountId", "notes", "reimbursed"],
+      ["date", "description", "category", "sessionId", "amount", "accountId", "intent", "notes", "reimbursed"],
       data.expenses.map((row) => [
         row.date,
         row.description,
@@ -57,8 +57,34 @@ export function exportCollectionCsv(type: string, data: AppData) {
         row.sessionId,
         row.amount,
         row.accountId,
+        row.intent,
         row.notes,
         row.reimbursed,
+      ]),
+    );
+  }
+
+  if (type === "court-member-packages") {
+    return toCsv(
+      [
+        "purchaseDate",
+        "name",
+        "venue",
+        "totalHours",
+        "totalAmount",
+        "expenseAccountId",
+        "notes",
+        "active",
+      ],
+      data.courtMemberPackages.map((row) => [
+        row.purchaseDate,
+        row.name,
+        row.venue,
+        row.totalHours,
+        row.totalAmount,
+        row.expenseAccountId,
+        row.notes,
+        row.active,
       ]),
     );
   }
@@ -97,7 +123,18 @@ export function exportCollectionCsv(type: string, data: AppData) {
 
   if (type === "sessions") {
     return toCsv(
-      ["date", "time", "code", "venue", "defaultSlotPrice", "courtPrice", "courtFree", "active"],
+      [
+        "date",
+        "time",
+        "code",
+        "venue",
+        "defaultSlotPrice",
+        "courtPrice",
+        "courtFree",
+        "courtMemberPackageId",
+        "memberUsageHours",
+        "active",
+      ],
       data.sessions.map((row) => [
         row.date,
         row.time,
@@ -106,6 +143,8 @@ export function exportCollectionCsv(type: string, data: AppData) {
         row.defaultSlotPrice,
         row.courtPrice,
         row.courtFree,
+        row.courtMemberPackageId,
+        row.memberUsageHours,
         row.active,
       ]),
     );

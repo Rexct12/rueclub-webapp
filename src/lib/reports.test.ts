@@ -8,13 +8,29 @@ const data: AppData = {
     { id: "jago", name: "Jago", type: "bank", openingBalance: 0, active: true },
   ],
   sessions: [
-    { id: "kaya-001", code: "Kaya Padel-001", date: "2026-04-01", defaultSlotPrice: 100000, active: true },
+    {
+      id: "kaya-001",
+      code: "Kaya Padel-001",
+      date: "2026-04-01",
+      time: undefined,
+      venue: "Kaya Padel",
+      defaultSlotPrice: 100000,
+      courtPrice: 45000,
+      courtFree: false,
+      courtExpenseAccountId: "bca",
+      courtMemberPackageId: undefined,
+      memberUsageHours: 0,
+      active: true,
+    },
   ],
   participantPayments: [
     {
       id: "p1",
       date: "2026-04-01",
       playerName: "Ryan",
+      rueclubName: undefined,
+      instagram: undefined,
+      whatsapp: undefined,
       category: "Umum",
       sessionId: "kaya-001",
       slotPrice: 100000,
@@ -23,6 +39,8 @@ const data: AppData = {
       status: "Lunas",
       method: "Transfer",
       accountId: "bca",
+      notes: undefined,
+      receiptUrl: undefined,
       createdAt: "2026-04-01T00:00:00.000Z",
       updatedAt: "2026-04-01T00:00:00.000Z",
       createdBy: "u1",
@@ -32,12 +50,19 @@ const data: AppData = {
       id: "p2",
       date: "2026-04-01",
       playerName: "Nura",
+      rueclubName: undefined,
+      instagram: undefined,
+      whatsapp: undefined,
       category: "Owner",
       sessionId: "kaya-001",
       slotPrice: 100000,
       discount: 100000,
       total: 0,
       status: "Free",
+      method: undefined,
+      accountId: undefined,
+      notes: undefined,
+      receiptUrl: undefined,
       createdAt: "2026-04-01T00:00:00.000Z",
       updatedAt: "2026-04-01T00:00:00.000Z",
       createdBy: "u1",
@@ -53,6 +78,9 @@ const data: AppData = {
       sessionId: "kaya-001",
       amount: 45000,
       accountId: "bca",
+      intent: "operational",
+      notes: undefined,
+      receiptUrl: undefined,
       reimbursed: false,
       createdAt: "2026-04-01T00:00:00.000Z",
       updatedAt: "2026-04-01T00:00:00.000Z",
@@ -60,11 +88,13 @@ const data: AppData = {
       updatedBy: "u1",
     },
   ],
+  courtMemberPackages: [],
   capitalDeposits: [
     {
       id: "c1",
       date: "2026-04-01",
       description: "Modal",
+      sessionId: undefined,
       amount: 50000,
       accountId: "jago",
       sharingInvest: false,
@@ -117,6 +147,8 @@ describe("buildDashboardReport", () => {
           baseAmount: 55000,
           amount: 27500,
           accountId: "bca",
+          notes: undefined,
+          receiptUrl: undefined,
           createdAt: "2026-04-01T00:00:00.000Z",
           updatedAt: "2026-04-01T00:00:00.000Z",
           createdBy: "u1",
@@ -134,6 +166,41 @@ describe("buildDashboardReport", () => {
       profitBeforeSharing: 55000,
       profitSharing: 27500,
       profit: 27500,
+    });
+  });
+
+  it("does not reduce cash balance for court member usage expense intent", () => {
+    const report = buildDashboardReport({
+      ...data,
+      expenses: [
+        ...data.expenses,
+        {
+          id: "e2",
+          date: "2026-04-01",
+          description: "Court Member Usage",
+          category: "Court",
+          sessionId: "kaya-001",
+          amount: 100000,
+          accountId: "bca",
+          intent: "courtMemberUsage",
+          notes: undefined,
+          receiptUrl: undefined,
+          reimbursed: false,
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+          createdBy: "u1",
+          updatedBy: "u1",
+        },
+      ],
+    });
+
+    expect(report.expenseTotal).toBe(45000);
+    expect(report.currentBalance).toBe(205000);
+    expect(report.accountBalances.find((row) => row.accountId === "bca")?.balance).toBe(155000);
+    expect(report.sessionReports[0]).toMatchObject({
+      costOfService: 145000,
+      profitBeforeSharing: -45000,
+      profit: -45000,
     });
   });
 });

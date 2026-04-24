@@ -5,6 +5,8 @@ import {
   capitalDepositInputSchema,
   capitalDepositSchema,
   computePaymentTotal,
+  courtMemberPackageInputSchema,
+  courtMemberPackageSchema,
   expenseInputSchema,
   expenseSchema,
   isRealMoneyAccount,
@@ -19,6 +21,8 @@ import {
   type CapitalDeposit,
   type CapitalDepositInput,
   type CollectionName,
+  type CourtMemberPackage,
+  type CourtMemberPackageInput,
   type Expense,
   type ExpenseInput,
   type ParticipantPayment,
@@ -30,6 +34,8 @@ import {
   userSchema,
 } from "@/lib/domain";
 import { defaultAccounts } from "@/lib/defaults";
+import { buildMigratedSessionCodes, DEFAULT_SESSION_CODE_FORMAT } from "@/lib/session-code";
+import { syncParticipantSlotPriceWithSessionDefault } from "@/lib/session-slot-sync";
 import { getAdminDb, isFirebaseConfigured } from "@/server/firebase";
 
 type LocalStore = AppData & {
@@ -48,6 +54,7 @@ function emptyLocalStore(): LocalStore {
     sessions: [],
     participantPayments: [],
     expenses: [],
+    courtMemberPackages: [],
     capitalDeposits: [],
     profitSharings: [],
     users: [],
@@ -81,6 +88,28 @@ function reviveFirestoreValue(value: unknown): unknown {
   if (value && typeof value === "object" && "toDate" in value) {
     const timestamp = value as { toDate: () => Date };
     return timestamp.toDate().toISOString();
+  }
+
+  return value;
+}
+
+function sanitizeFirestoreValue(value: unknown): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeFirestoreValue(item))
+      .filter((item) => item !== undefined);
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value)
+      .map(([key, item]) => [key, sanitizeFirestoreValue(item)] as const)
+      .filter(([, item]) => item !== undefined);
+
+    return Object.fromEntries(entries);
   }
 
   return value;
@@ -123,7 +152,8 @@ async function saveDocument<T extends { id: string }>(
   }
 
   const { id, ...payload } = value;
-  await getAdminDb().collection(collection).doc(id).set(payload, { merge: true });
+  const sanitizedPayload = sanitizeFirestoreValue(payload) as Record<string, unknown>;
+  await getAdminDb().collection(collection).doc(id).set(sanitizedPayload, { merge: true });
   return value;
 }
 
@@ -140,23 +170,47 @@ export async function deleteDocument(collection: CollectionName, id: string) {
 }
 
 export async function getAppData(): Promise<AppData> {
-  const [accounts, sessions, participantPayments, expenses, capitalDeposits, profitSharings] = await Promise.all([
+  const [accounts, sessions, participantPayments, expenses, courtMemberPackages, capitalDeposits, profitSharings] = await Promise.all([
     readCollection("accounts", accountSchema.parse),
     readCollection("sessions", sessionSchema.parse),
     readCollection("participantPayments", participantPaymentSchema.parse),
     readCollection("expenses", expenseSchema.parse),
+    readCollection("courtMemberPackages", courtMemberPackageSchema.parse),
     readCollection("capitalDeposits", capitalDepositSchema.parse),
     readCollection("profitSharings", profitSharingSchema.parse),
   ]);
 
+  const migratedSessions = await migrateSessionCodesIfNeeded(sessions);
+
   return {
     accounts: (accounts.length ? accounts : defaultAccounts).filter(isRealMoneyAccount),
-    sessions,
+    sessions: migratedSessions,
     participantPayments,
     expenses,
+    courtMemberPackages,
     capitalDeposits,
     profitSharings,
   };
+}
+
+async function migrateSessionCodesIfNeeded(sessions: Session[]) {
+  const updates = buildMigratedSessionCodes(sessions, DEFAULT_SESSION_CODE_FORMAT);
+  if (!updates.length) return sessions;
+
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const migratedSessions = [...sessions];
+
+  for (const update of updates) {
+    const existing = byId.get(update.id);
+    if (!existing) continue;
+    const migrated = sessionSchema.parse({ ...existing, code: update.code });
+    await saveDocument("sessions", migrated);
+    await syncSessionCourtExpense(migrated, "system-migration");
+    const index = migratedSessions.findIndex((session) => session.id === migrated.id);
+    if (index >= 0) migratedSessions[index] = migrated;
+  }
+
+  return migratedSessions;
 }
 
 export async function getUsers(): Promise<User[]> {
@@ -178,7 +232,7 @@ export async function upsertAccount(account: Omit<Account, "id"> & { id?: string
 export async function upsertSession(session: Omit<Session, "id"> & { id?: string }, userId = "system") {
   const value = sessionSchema.parse({
     ...session,
-    id: session.id ?? slugId(session.code),
+    id: session.id ?? crypto.randomUUID(),
   });
   const saved = await saveDocument("sessions", value);
   await syncSessionCourtExpense(saved, userId);
@@ -190,12 +244,84 @@ export async function deleteSession(id: string) {
   await deleteDocument("expenses", sessionCourtExpenseId(id));
 }
 
+export async function syncSessionParticipantSlotPricesWithDefaultChange(
+  sessionId: string,
+  oldDefaultSlotPrice: number,
+  newDefaultSlotPrice: number,
+  userId: string,
+) {
+  if (oldDefaultSlotPrice === newDefaultSlotPrice) return 0;
+
+  const participantPayments = await readCollection("participantPayments", participantPaymentSchema.parse);
+  const targetPayments = participantPayments.filter((payment) => payment.sessionId === sessionId);
+  if (!targetPayments.length) return 0;
+
+  const timestamp = nowIso();
+  let updatedCount = 0;
+
+  for (const payment of targetPayments) {
+    const synced = syncParticipantSlotPriceWithSessionDefault(payment, oldDefaultSlotPrice, newDefaultSlotPrice);
+    if (!synced.shouldUpdate) continue;
+
+    const value: ParticipantPayment = participantPaymentSchema.parse({
+      ...payment,
+      slotPrice: synced.slotPrice,
+      discount: synced.discount,
+      total: synced.total,
+      updatedAt: timestamp,
+      updatedBy: userId,
+    });
+    await saveDocument("participantPayments", value);
+    updatedCount += 1;
+  }
+
+  return updatedCount;
+}
+
 function sessionCourtExpenseId(sessionId: string) {
   return `court-expense-${sessionId}`;
 }
 
 async function syncSessionCourtExpense(session: Session, userId: string) {
   const expenseId = sessionCourtExpenseId(session.id);
+
+  if (session.courtMemberPackageId && session.memberUsageHours > 0) {
+    const memberPackage = (await readCollection("courtMemberPackages", courtMemberPackageSchema.parse)).find(
+      (row) => row.id === session.courtMemberPackageId,
+    );
+
+    if (!memberPackage) {
+      await deleteDocument("expenses", expenseId);
+      return;
+    }
+
+    const hourlyRate = memberPackage.totalAmount / memberPackage.totalHours;
+    const calculatedAmount = Math.round(hourlyRate * session.memberUsageHours);
+    const timestamp = nowIso();
+    const existing = (await readCollection("expenses", expenseSchema.parse)).find(
+      (expense) => expense.id === expenseId,
+    );
+
+    const value: Expense = expenseSchema.parse({
+      id: expenseId,
+      date: session.date,
+      description: `Court Member Usage - ${session.code}`,
+      category: "Court",
+      sessionId: session.id,
+      amount: calculatedAmount,
+      accountId: memberPackage.expenseAccountId,
+      intent: "courtMemberUsage",
+      notes: `Auto-generated from member package ${memberPackage.name} (${session.memberUsageHours} jam)`,
+      reimbursed: false,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+      createdBy: existing?.createdBy ?? userId,
+      updatedBy: userId,
+    });
+
+    await saveDocument("expenses", value);
+    return;
+  }
 
   if (session.courtFree || session.courtPrice <= 0 || !session.courtExpenseAccountId) {
     await deleteDocument("expenses", expenseId);
@@ -214,6 +340,7 @@ async function syncSessionCourtExpense(session: Session, userId: string) {
     sessionId: session.id,
     amount: session.courtPrice,
     accountId: session.courtExpenseAccountId,
+    intent: "operational",
     notes: "Auto-generated from session court price",
     reimbursed: false,
     createdAt: existing?.createdAt ?? timestamp,
@@ -338,6 +465,54 @@ export async function createCapitalDeposit(input: CapitalDepositInput, userId: s
     updatedBy: userId,
   });
   return saveDocument("capitalDeposits", value);
+}
+
+export async function upsertCourtMemberPackage(
+  input: Omit<CourtMemberPackageInput, "active"> & { active?: boolean; id?: string },
+  userId: string,
+) {
+  const parsed = courtMemberPackageInputSchema.parse(input);
+  const timestamp = nowIso();
+  const existing = input.id
+    ? (await readCollection("courtMemberPackages", courtMemberPackageSchema.parse)).find(
+      (row) => row.id === input.id,
+    )
+    : undefined;
+
+  const value: CourtMemberPackage = courtMemberPackageSchema.parse({
+    ...parsed,
+    id: input.id ?? crypto.randomUUID(),
+    active: input.active ?? true,
+    createdAt: existing?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+    createdBy: existing?.createdBy ?? userId,
+    updatedBy: userId,
+  });
+
+  const saved = await saveDocument("courtMemberPackages", value);
+
+  const purchaseExpenseId = `court-member-purchase-${saved.id}`;
+  const existingPurchaseExpense = (await readCollection("expenses", expenseSchema.parse)).find(
+    (expense) => expense.id === purchaseExpenseId,
+  );
+  const purchaseExpense: Expense = expenseSchema.parse({
+    id: purchaseExpenseId,
+    date: saved.purchaseDate,
+    description: `Beli paket member - ${saved.name}`,
+    category: "Court",
+    amount: saved.totalAmount,
+    accountId: saved.expenseAccountId,
+    intent: "courtMemberPurchase",
+    notes: saved.notes,
+    reimbursed: false,
+    createdAt: existingPurchaseExpense?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+    createdBy: existingPurchaseExpense?.createdBy ?? userId,
+    updatedBy: userId,
+  });
+  await saveDocument("expenses", purchaseExpense);
+
+  return saved;
 }
 
 export function backendLabel() {
