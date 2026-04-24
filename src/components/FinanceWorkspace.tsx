@@ -181,6 +181,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const [toast, setToast] = useState<Toast | null>(null);
   const [savingMasterType, setSavingMasterType] = useState<"account" | "session" | null>(null);
   const [savingCourtMemberPackage, setSavingCourtMemberPackage] = useState(false);
+  const [deletingCourtMemberPackageId, setDeletingCourtMemberPackageId] = useState<string | null>(null);
   const [savingTransactionType, setSavingTransactionType] = useState<"expense" | "capitalDeposit" | null>(null);
   const transactionInFlight = useRef<"expense" | "capitalDeposit" | null>(null);
   const [activeView, setActiveView] = useState<View>(() => viewFromHash());
@@ -471,6 +472,33 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       hasCurrentTargetBeforeAwait: Boolean(form),
     });
     const base = Object.fromEntries(new FormData(form).entries());
+    const normalizedName = String(base.name ?? "").trim().toLocaleLowerCase("id");
+    const normalizedVenue = String(base.venue ?? "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLocaleLowerCase("id");
+    const normalizedPurchaseDate = String(base.purchaseDate ?? "").trim();
+    const normalizedTotalHours = Number(base.totalHours ?? 0);
+    const normalizedTotalAmount = money(String(base.totalAmount ?? 0));
+    const possibleDuplicate = activeCourtMemberPackages.find((item) =>
+      item.name.trim().toLocaleLowerCase("id") === normalizedName
+      && item.venue.trim().replace(/\s+/g, " ").toLocaleLowerCase("id") === normalizedVenue
+      && item.purchaseDate === normalizedPurchaseDate
+      && item.totalHours === normalizedTotalHours
+      && item.totalAmount === normalizedTotalAmount,
+    );
+    if (possibleDuplicate) {
+      console.warn("[court-member] submit:possible-duplicate", {
+        existingId: possibleDuplicate.id,
+        name: base.name,
+        venue: base.venue,
+        purchaseDate: base.purchaseDate,
+      });
+    }
+    console.info("[court-member] submit:venue-normalization", {
+      rawVenue: base.venue,
+      normalizedVenue,
+    });
     try {
       await postJson("/api/master", {
         type: "courtMemberPackage",
@@ -513,6 +541,24 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     }
     const data = await readResponseJson(response);
     setToast({ type: "error", message: jsonErrorMessage(data) || "Gagal menghapus akun." });
+  }
+
+  async function deleteCourtMemberPackage(row: CourtMemberPackage) {
+    if (deletingCourtMemberPackageId) return;
+    if (!window.confirm(`Hapus paket member ${row.name} (${row.venue})?`)) return;
+    setDeletingCourtMemberPackageId(row.id);
+    try {
+      const response = await fetch(`/api/master?type=courtMemberPackage&id=${row.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        const data = await readResponseJson(response);
+        throw new Error(jsonErrorMessage(data) || "Gagal menghapus paket member.");
+      }
+      reloadAfter("Paket member dihapus.");
+    } catch (error) {
+      setToast({ type: "error", message: error instanceof Error ? error.message : "Gagal menghapus paket member." });
+    } finally {
+      setDeletingCourtMemberPackageId(null);
+    }
   }
 
   function filledParticipants(rows: ParticipantDraft[]) {
@@ -874,7 +920,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         </section>
 
         <section className="session-workspace" id="input">
-          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} courtMemberPackageOptions={courtMemberPackageOptions} packageRows={activeCourtMemberPackages} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} savingCourtMemberPackage={savingCourtMemberPackage} onDeleteAccount={deleteAccount} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} onSaveCourtMemberPackage={submitCourtMemberPackage} /></details>
+          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} courtMemberPackageOptions={courtMemberPackageOptions} packageRows={activeCourtMemberPackages} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} savingCourtMemberPackage={savingCourtMemberPackage} deletingCourtMemberPackageId={deletingCourtMemberPackageId} onDeleteAccount={deleteAccount} onDeleteCourtMemberPackage={deleteCourtMemberPackage} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} onSaveCourtMemberPackage={submitCourtMemberPackage} /></details>
           <div className="section-head horizontal-head">
             <div><h2>Sesi Berjalan</h2><p>Pilih sesi untuk cek slot terisi, expense, profit, dan pembayaran yang belum masuk.</p></div>
             <div className="session-section-actions"><button className="secondary-button" onClick={() => goToView("reports")}>Lihat Laporan</button><button onClick={openWizard}>Buat Sesi Baru</button></div>
@@ -1581,7 +1627,7 @@ function ParticipantAppendModal({ accountOptions, onClose, onDetail, onParticipa
   );
 }
 
-function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions, onDeleteAccount, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today, onSaveCourtMemberPackage, savingCourtMemberPackage, packageRows }: { accounts: Account[]; accountOptions: Array<[string, string]>; courtMemberPackageOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string; onSaveCourtMemberPackage: (event: FormEvent<HTMLFormElement>) => void; savingCourtMemberPackage: boolean; packageRows: CourtMemberPackage[] }) {
+function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions, onDeleteAccount, onDeleteCourtMemberPackage, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today, onSaveCourtMemberPackage, savingCourtMemberPackage, deletingCourtMemberPackageId, packageRows }: { accounts: Account[]; accountOptions: Array<[string, string]>; courtMemberPackageOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onDeleteCourtMemberPackage: (row: CourtMemberPackage) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string; onSaveCourtMemberPackage: (event: FormEvent<HTMLFormElement>) => void; savingCourtMemberPackage: boolean; deletingCourtMemberPackageId: string | null; packageRows: CourtMemberPackage[] }) {
   return (
     <div className="manual-admin-grid">
       <FormPanel title="Beli Paket Member Court">
@@ -1603,6 +1649,9 @@ function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions,
               <div className="account-delete-row" key={row.id}>
                 <span>{row.name} - {row.venue}</span>
                 <small>{formatCurrency(row.totalAmount)} / {row.totalHours} jam ({formatCurrency(rate)}/jam)</small>
+                <button className="table-button" type="button" onClick={() => onDeleteCourtMemberPackage(row)} disabled={deletingCourtMemberPackageId !== null}>
+                  {deletingCourtMemberPackageId === row.id ? "Menghapus..." : "Hapus"}
+                </button>
               </div>
             );
           })}
