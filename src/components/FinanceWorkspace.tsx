@@ -1085,7 +1085,7 @@ function SessionWizard({
             <label>Jam sesi<input type="time" value={session.time} onChange={(event) => onSessionChange({ ...session, time: event.target.value })} /></label>
             <label>Durasi
               <div className="session-duration-input">
-                <input type="number" min={0.25} step={0.25} value={session.memberUsageHours} onChange={(event) => onSessionChange({ ...session, memberUsageHours: event.target.value })} required />
+                <input type="number" min={1} step={1} value={session.memberUsageHours} onChange={(event) => onSessionChange({ ...session, memberUsageHours: event.target.value })} required />
                 <span>Jam</span>
               </div>
             </label>
@@ -1298,6 +1298,7 @@ function SessionEditModal({
 }) {
   const [activeStep, setActiveStep] = useState<Step>(1);
   const firstAccountId = accountOptions[0]?.[0] ?? "";
+  const [selectedCourtMemberPackageId, setSelectedCourtMemberPackageId] = useState(session.courtMemberPackageId ?? "");
   const [addingParticipants, setAddingParticipants] = useState(false);
   const [addingExpense, setAddingExpense] = useState(false);
   const [newProfitSharingType, setNewProfitSharingType] = useState<(typeof profitSharingCalculationTypes)[number]>("fixed");
@@ -1316,6 +1317,10 @@ function SessionEditModal({
     { step: 3, label: "Pengeluaran", helper: `${formatCurrency(expenseTotal)} + ${formatCurrency(profitSharingTotal)}` },
     { step: 4, label: "Review", helper: "Ringkasan koreksi" },
   ];
+
+  useEffect(() => {
+    setSelectedCourtMemberPackageId(session.courtMemberPackageId ?? "");
+  }, [session.id, session.courtMemberPackageId]);
 
   async function saveNewParticipants() {
     const count = await onNewParticipantsSave(session, newParticipants);
@@ -1352,10 +1357,15 @@ function SessionEditModal({
               <label>Harga slot default<MoneyInput name="defaultSlotPrice" defaultValue={session.defaultSlotPrice} /></label>
               <label>Harga lapangan<MoneyInput name="courtPrice" defaultValue={session.courtPrice} /></label>
               <label>Akun biaya lapangan<select name="courtExpenseAccountId" defaultValue={session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? ""}>{accountOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label>Paket member<Select name="courtMemberPackageId" options={courtMemberPackageOptions} value={session.courtMemberPackageId ?? ""} /></label>
+              <label>
+                Paket member
+                <select name="courtMemberPackageId" value={selectedCourtMemberPackageId} onChange={(event) => setSelectedCourtMemberPackageId(event.target.value)}>
+                  {courtMemberPackageOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
               <label>Durasi
                 <div className="session-duration-input">
-                  <input name="memberUsageHours" type="number" min={0.25} step="0.25" defaultValue={session.memberUsageHours ?? 2} required />
+                  <input name="memberUsageHours" type="number" min={1} step={1} defaultValue={session.memberUsageHours ?? 2} required />
                   <span>Jam</span>
                 </div>
               </label>
@@ -1733,7 +1743,7 @@ function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions,
           <Select name="courtMemberPackageId" options={courtMemberPackageOptions} />
           <label>Durasi
             <div className="session-duration-input">
-              <input name="memberUsageHours" type="number" min={0.25} step="0.25" placeholder="Durasi" defaultValue={2} required />
+              <input name="memberUsageHours" type="number" min={1} step={1} placeholder="Durasi" defaultValue={2} required />
               <span>Jam</span>
             </div>
           </label>
