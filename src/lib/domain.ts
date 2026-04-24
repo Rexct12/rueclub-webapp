@@ -67,15 +67,7 @@ export const sessionSchema = z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["memberUsageHours"],
-      message: "Jam pakai member wajib diisi lebih dari 0 jika paket member dipilih.",
-    });
-  }
-
-  if (!session.courtMemberPackageId && session.memberUsageHours > 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["courtMemberPackageId"],
-      message: "Pilih paket member jika jam pakai member lebih dari 0.",
+      message: "Durasi wajib diisi lebih dari 0 jika paket member dipilih.",
     });
   }
 });
