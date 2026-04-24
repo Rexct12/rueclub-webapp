@@ -175,6 +175,25 @@ th {
   color: var(--danger);
 }
 
+.session-duration-input {
+  position: relative;
+  display: block;
+}
+
+.session-duration-input input {
+  padding-right: 52px;
+}
+
+.session-duration-input span {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.85rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
