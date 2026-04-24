@@ -6,6 +6,7 @@ export const paymentStatuses = ["Lunas", "Belum", "Free"] as const;
 export const paymentMethods = ["Transfer", "Cash"] as const;
 export const profitSharingCalculationTypes = ["fixed", "percent"] as const;
 export const expenseIntents = ["operational", "courtMemberPurchase", "courtMemberUsage"] as const;
+export const knownVenues = ["Kaya Padel"] as const;
 export const expenseCategories = [
   "Biaya Admin TF",
   "Biaya Compliment",
@@ -61,6 +62,22 @@ export const sessionSchema = z.object({
   courtMemberPackageId: optionalText,
   memberUsageHours: z.coerce.number().finite().min(0).default(0),
   active: z.boolean().default(true),
+}).superRefine((session, ctx) => {
+  if (session.courtMemberPackageId && session.memberUsageHours <= 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["memberUsageHours"],
+      message: "Jam pakai member wajib diisi lebih dari 0 jika paket member dipilih.",
+    });
+  }
+
+  if (!session.courtMemberPackageId && session.memberUsageHours > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["courtMemberPackageId"],
+      message: "Pilih paket member jika jam pakai member lebih dari 0.",
+    });
+  }
 });
 
 export const userSchema = z.object({
@@ -304,6 +321,10 @@ export function slugId(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+}
+
+export function normalizeVenueText(value: string) {
+  return value.trim().replace(/\s+/g, " ");
 }
 
 export function computePaymentTotal(input: ParticipantPaymentInput) {

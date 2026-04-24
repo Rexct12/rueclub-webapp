@@ -4,7 +4,7 @@ import type { FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Account, AiDraft, AppData, CourtMemberPackage, Expense, ParticipantPayment, ProfitSharing, Session } from "@/lib/domain";
-import { expenseCategories, paymentCategories, paymentMethods, paymentStatuses, profitSharingCalculationTypes, todayInBangkok } from "@/lib/domain";
+import { expenseCategories, knownVenues, normalizeVenueText, paymentCategories, paymentMethods, paymentStatuses, profitSharingCalculationTypes, todayInBangkok } from "@/lib/domain";
 import { formatCurrency, formatNumber, parseRupiah } from "@/lib/format";
 import { jsonErrorMessage, readResponseJson } from "@/lib/fetch-json";
 import type { DashboardReport } from "@/lib/reports";
@@ -240,6 +240,24 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     ],
     [activeCourtMemberPackages],
   );
+  const packageUsageById = useMemo(() => {
+    const usedHoursByPackageId = new Map<string, number>();
+    for (const session of data.sessions) {
+      if (!session.courtMemberPackageId || session.memberUsageHours <= 0) continue;
+      usedHoursByPackageId.set(
+        session.courtMemberPackageId,
+        (usedHoursByPackageId.get(session.courtMemberPackageId) ?? 0) + session.memberUsageHours,
+      );
+    }
+
+    return new Map(
+      activeCourtMemberPackages.map((pkg) => {
+        const usedHours = usedHoursByPackageId.get(pkg.id) ?? 0;
+        const remainingHours = Math.max(0, pkg.totalHours - usedHours);
+        return [pkg.id, { usedHours, remainingHours }];
+      }),
+    );
+  }, [activeCourtMemberPackages, data.sessions]);
   const firstAccountId = activeAccounts[0]?.id ?? "";
 
   const [sessionDraft, setSessionDraft] = useState<SessionDraft>(() => ({ date: today, time: "", code: "", venue: "", defaultSlotPrice: "0", courtPrice: "0", courtFree: false, courtExpenseAccountId: firstAccountId }));
@@ -422,6 +440,13 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       };
 
     if (type === "session") {
+      const hasMemberPackage = Boolean(String(payload.courtMemberPackageId ?? "").trim());
+      if (hasMemberPackage && Number(payload.memberUsageHours ?? 0) <= 0) {
+        throw new Error("Jika paket member dipilih, Jam pakai member wajib lebih dari 0.");
+      }
+      if (!hasMemberPackage && Number(payload.memberUsageHours ?? 0) > 0) {
+        throw new Error("Isi paket member terlebih dahulu jika Jam pakai member lebih dari 0.");
+      }
       const currentCode = String(payload.code ?? "").trim();
       if (!currentCode) {
         payload.code = generateCodeByDraft(
@@ -472,53 +497,37 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       hasCurrentTargetBeforeAwait: Boolean(form),
     });
     const base = Object.fromEntries(new FormData(form).entries());
-    const normalizedName = String(base.name ?? "").trim().toLocaleLowerCase("id");
-    const normalizedVenue = String(base.venue ?? "")
-      .trim()
-      .replace(/\s+/g, " ")
-      .toLocaleLowerCase("id");
+    const normalizedName = String(base.name ?? "").trim();
+    const normalizedVenue = normalizeVenueText(String(base.venue ?? ""));
+    const canonicalVenue =
+      knownVenues.find((venue) => venue.toLocaleLowerCase("id") === normalizedVenue.toLocaleLowerCase("id"))
+      ?? normalizedVenue;
     const normalizedPurchaseDate = String(base.purchaseDate ?? "").trim();
     const normalizedTotalHours = Number(base.totalHours ?? 0);
     const normalizedTotalAmount = money(String(base.totalAmount ?? 0));
     const possibleDuplicate = activeCourtMemberPackages.find((item) =>
-      item.name.trim().toLocaleLowerCase("id") === normalizedName
-      && item.venue.trim().replace(/\s+/g, " ").toLocaleLowerCase("id") === normalizedVenue
+      item.name.trim().toLocaleLowerCase("id") === normalizedName.toLocaleLowerCase("id")
+      && normalizeVenueText(item.venue).toLocaleLowerCase("id") === canonicalVenue.toLocaleLowerCase("id")
       && item.purchaseDate === normalizedPurchaseDate
       && item.totalHours === normalizedTotalHours
       && item.totalAmount === normalizedTotalAmount,
     );
-    if (possibleDuplicate) {
-      console.warn("[court-member] submit:possible-duplicate", {
-        existingId: possibleDuplicate.id,
-        name: base.name,
-        venue: base.venue,
-        purchaseDate: base.purchaseDate,
-      });
-    }
-    console.info("[court-member] submit:venue-normalization", {
-      rawVenue: base.venue,
-      normalizedVenue,
-    });
+    if (possibleDuplicate) throw new Error("Paket member duplikat terdeteksi. Cek data yang sama di daftar paket.");
     try {
       await postJson("/api/master", {
         type: "courtMemberPackage",
         purchaseDate: base.purchaseDate,
-        name: base.name,
-        venue: base.venue,
+        name: normalizedName,
+        venue: canonicalVenue,
         totalHours: Number(base.totalHours ?? 0),
         totalAmount: money(String(base.totalAmount ?? 0)),
         expenseAccountId: base.expenseAccountId,
         notes: base.notes,
         active: true,
       });
-      console.info("[court-member] submit:success", {
-        hasCurrentTargetAfterAwait: Boolean(event.currentTarget),
-      });
       form.reset();
-      console.info("[court-member] submit:form-reset", { formResetExecuted: true });
       reloadAfter("Paket member disimpan.");
     } catch (error) {
-      console.error("[court-member] submit:error", error);
       setToast({ type: "error", message: error instanceof Error ? error.message : "Gagal menyimpan paket member." });
     } finally {
       setSavingCourtMemberPackage(false);
@@ -920,7 +929,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         </section>
 
         <section className="session-workspace" id="input">
-          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} courtMemberPackageOptions={courtMemberPackageOptions} packageRows={activeCourtMemberPackages} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} savingCourtMemberPackage={savingCourtMemberPackage} deletingCourtMemberPackageId={deletingCourtMemberPackageId} onDeleteAccount={deleteAccount} onDeleteCourtMemberPackage={deleteCourtMemberPackage} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} onSaveCourtMemberPackage={submitCourtMemberPackage} /></details>
+          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} courtMemberPackageOptions={courtMemberPackageOptions} packageRows={activeCourtMemberPackages} packageUsageById={packageUsageById} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} savingCourtMemberPackage={savingCourtMemberPackage} deletingCourtMemberPackageId={deletingCourtMemberPackageId} onDeleteAccount={deleteAccount} onDeleteCourtMemberPackage={deleteCourtMemberPackage} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} onSaveCourtMemberPackage={submitCourtMemberPackage} /></details>
           <div className="section-head horizontal-head">
             <div><h2>Sesi Berjalan</h2><p>Pilih sesi untuk cek slot terisi, expense, profit, dan pembayaran yang belum masuk.</p></div>
             <div className="session-section-actions"><button className="secondary-button" onClick={() => goToView("reports")}>Lihat Laporan</button><button onClick={openWizard}>Buat Sesi Baru</button></div>
@@ -1627,7 +1636,7 @@ function ParticipantAppendModal({ accountOptions, onClose, onDetail, onParticipa
   );
 }
 
-function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions, onDeleteAccount, onDeleteCourtMemberPackage, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today, onSaveCourtMemberPackage, savingCourtMemberPackage, deletingCourtMemberPackageId, packageRows }: { accounts: Account[]; accountOptions: Array<[string, string]>; courtMemberPackageOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onDeleteCourtMemberPackage: (row: CourtMemberPackage) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string; onSaveCourtMemberPackage: (event: FormEvent<HTMLFormElement>) => void; savingCourtMemberPackage: boolean; deletingCourtMemberPackageId: string | null; packageRows: CourtMemberPackage[] }) {
+function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions, onDeleteAccount, onDeleteCourtMemberPackage, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today, onSaveCourtMemberPackage, savingCourtMemberPackage, deletingCourtMemberPackageId, packageRows, packageUsageById }: { accounts: Account[]; accountOptions: Array<[string, string]>; courtMemberPackageOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onDeleteCourtMemberPackage: (row: CourtMemberPackage) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string; onSaveCourtMemberPackage: (event: FormEvent<HTMLFormElement>) => void; savingCourtMemberPackage: boolean; deletingCourtMemberPackageId: string | null; packageRows: CourtMemberPackage[]; packageUsageById: Map<string, { usedHours: number; remainingHours: number }> }) {
   return (
     <div className="manual-admin-grid">
       <FormPanel title="Beli Paket Member Court">
@@ -1635,7 +1644,8 @@ function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions,
         <form onSubmit={onSaveCourtMemberPackage} className="form-grid">
           <input name="purchaseDate" type="date" defaultValue={today} required />
           <input name="name" placeholder="Nama paket (contoh: Paket Gold April)" required />
-          <input name="venue" placeholder="Venue/lapangan" required />
+          <input name="venue" list="known-court-venues" placeholder="Venue/lapangan" required />
+          <datalist id="known-court-venues">{knownVenues.map((venue) => <option key={venue} value={venue} />)}</datalist>
           <input name="totalHours" type="number" min={0.25} step="0.25" placeholder="Total jam" required />
           <MoneyInput name="totalAmount" placeholder="Total pembelian" required />
           <Select name="expenseAccountId" options={accountOptions} required />
@@ -1645,10 +1655,12 @@ function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions,
         <div className="account-delete-list">
           {packageRows.map((row) => {
             const rate = row.totalHours > 0 ? Math.round(row.totalAmount / row.totalHours) : 0;
+            const usage = packageUsageById.get(row.id) ?? { usedHours: 0, remainingHours: row.totalHours };
             return (
               <div className="account-delete-row" key={row.id}>
                 <span>{row.name} - {row.venue}</span>
                 <small>{formatCurrency(row.totalAmount)} / {row.totalHours} jam ({formatCurrency(rate)}/jam)</small>
+                <small>Terpakai {usage.usedHours} jam • Sisa {usage.remainingHours} jam</small>
                 <button className="table-button" type="button" onClick={() => onDeleteCourtMemberPackage(row)} disabled={deletingCourtMemberPackageId !== null}>
                   {deletingCourtMemberPackageId === row.id ? "Menghapus..." : "Hapus"}
                 </button>

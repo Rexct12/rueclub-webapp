@@ -10,6 +10,7 @@ import {
   expenseInputSchema,
   expenseSchema,
   isRealMoneyAccount,
+  normalizeVenueText,
   participantPaymentInputSchema,
   participantPaymentSchema,
   profitSharingInputSchema,
@@ -471,13 +472,30 @@ export async function upsertCourtMemberPackage(
   input: Omit<CourtMemberPackageInput, "active"> & { active?: boolean; id?: string },
   userId: string,
 ) {
-  const parsed = courtMemberPackageInputSchema.parse(input);
+  const parsed = courtMemberPackageInputSchema.parse({
+    ...input,
+    name: String(input.name ?? "").trim(),
+    venue: normalizeVenueText(String(input.venue ?? "")),
+  });
   const timestamp = nowIso();
+  const allPackages = await readCollection("courtMemberPackages", courtMemberPackageSchema.parse);
   const existing = input.id
-    ? (await readCollection("courtMemberPackages", courtMemberPackageSchema.parse)).find(
+    ? allPackages.find(
       (row) => row.id === input.id,
     )
     : undefined;
+
+  const duplicate = allPackages.find((row) =>
+    row.id !== input.id
+    && row.purchaseDate === parsed.purchaseDate
+    && row.totalHours === parsed.totalHours
+    && row.totalAmount === parsed.totalAmount
+    && row.name.trim().toLocaleLowerCase("id") === parsed.name.trim().toLocaleLowerCase("id")
+    && normalizeVenueText(row.venue).toLocaleLowerCase("id") === parsed.venue.toLocaleLowerCase("id"),
+  );
+  if (duplicate) {
+    throw new Error("Paket member duplikat terdeteksi. Cek nama, venue, tanggal, jam, dan nominal.");
+  }
 
   const value: CourtMemberPackage = courtMemberPackageSchema.parse({
     ...parsed,
