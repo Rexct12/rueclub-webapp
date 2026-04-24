@@ -466,7 +466,11 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     event.preventDefault();
     if (savingCourtMemberPackage) return;
     setSavingCourtMemberPackage(true);
-    const base = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const form = event.currentTarget;
+    console.info("[court-member] submit:start", {
+      hasCurrentTargetBeforeAwait: Boolean(form),
+    });
+    const base = Object.fromEntries(new FormData(form).entries());
     try {
       await postJson("/api/master", {
         type: "courtMemberPackage",
@@ -479,9 +483,14 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         notes: base.notes,
         active: true,
       });
-      event.currentTarget.reset();
+      console.info("[court-member] submit:success", {
+        hasCurrentTargetAfterAwait: Boolean(event.currentTarget),
+      });
+      form.reset();
+      console.info("[court-member] submit:form-reset", { formResetExecuted: true });
       reloadAfter("Paket member disimpan.");
     } catch (error) {
+      console.error("[court-member] submit:error", error);
       setToast({ type: "error", message: error instanceof Error ? error.message : "Gagal menyimpan paket member." });
     } finally {
       setSavingCourtMemberPackage(false);
