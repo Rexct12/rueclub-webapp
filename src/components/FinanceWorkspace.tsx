@@ -1304,6 +1304,7 @@ function SessionEditModal({
   const [newProfitSharingType, setNewProfitSharingType] = useState<(typeof profitSharingCalculationTypes)[number]>("fixed");
   const [newParticipants, setNewParticipants] = useState<ParticipantDraft[]>(() => makeParticipants(1, String(session.defaultSlotPrice ?? 0), firstAccountId));
   const [newParticipantDetailId, setNewParticipantDetailId] = useState<string | null>(null);
+  const sessionFormRef = useRef<HTMLFormElement | null>(null);
   const newParticipantDetail = newParticipantDetailId ? newParticipants.find((participant) => participant.id === newParticipantDetailId) ?? null : null;
   const paidTotal = payments.reduce((sum, payment) => sum + (payment.status === "Lunas" ? payment.total : 0), 0);
   const outstandingTotal = payments.reduce((sum, payment) => sum + (payment.status === "Belum" ? payment.total : 0), 0);
@@ -1321,6 +1322,15 @@ function SessionEditModal({
   useEffect(() => {
     setSelectedCourtMemberPackageId(session.courtMemberPackageId ?? "");
   }, [session.id, session.courtMemberPackageId]);
+
+  useEffect(() => {
+    const form = sessionFormRef.current;
+    if (!form) return;
+    const hiddenField = form.elements.namedItem("courtMemberPackageId") as HTMLInputElement | null;
+    if (hiddenField) {
+      hiddenField.value = selectedCourtMemberPackageId;
+    }
+  }, [selectedCourtMemberPackageId]);
 
   async function saveNewParticipants() {
     const count = await onNewParticipantsSave(session, newParticipants);
@@ -1348,8 +1358,9 @@ function SessionEditModal({
           {activeStep === 1 ? (
           <section className="session-edit-section">
             <div className="section-head compact-head"><h3>Detail sesi</h3><p>Ubah tanggal, jam, venue, harga slot, dan biaya lapangan.</p></div>
-            <form onSubmit={(event) => onSave(event, "session")} className="wizard-grid">
+            <form ref={sessionFormRef} onSubmit={(event) => onSave(event, "session")} className="wizard-grid">
               <input type="hidden" name="id" value={session.id} />
+              <input type="hidden" name="courtMemberPackageId" value={selectedCourtMemberPackageId} />
               <label>Tanggal<input name="date" type="date" defaultValue={session.date} required /></label>
               <label>Jam<input name="time" type="time" defaultValue={session.time ?? ""} /></label>
               <label>Kode sesi<input name="code" defaultValue={session.code} required /></label>
@@ -1359,7 +1370,7 @@ function SessionEditModal({
               <label>Akun biaya lapangan<select name="courtExpenseAccountId" defaultValue={session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? ""}>{accountOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
               <label>
                 Paket member
-                <select name="courtMemberPackageId" value={selectedCourtMemberPackageId} onChange={(event) => setSelectedCourtMemberPackageId(event.target.value)}>
+                <select value={selectedCourtMemberPackageId} onChange={(event) => setSelectedCourtMemberPackageId(event.target.value)}>
                   {courtMemberPackageOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
