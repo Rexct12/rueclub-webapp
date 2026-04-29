@@ -966,6 +966,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       {editingSession ? (
         <SessionEditModal
           accountOptions={accountOptions}
+          courtMemberPackages={activeCourtMemberPackages}
           expenses={editingSessionExpenses}
           onClose={() => setEditingSessionId(null)}
           onDelete={deleteSession}
@@ -1222,6 +1223,7 @@ function ParticipantDetailModal({ participant, onChange, onClose }: { participan
 
 function SessionEditModal({
   accountOptions,
+  courtMemberPackages,
   courtMemberPackageOptions,
   expenses,
   isSaving,
@@ -1241,6 +1243,7 @@ function SessionEditModal({
   session,
 }: {
   accountOptions: Array<[string, string]>;
+  courtMemberPackages: CourtMemberPackage[];
   courtMemberPackageOptions: Array<[string, string]>;
   expenses: Expense[];
   isSaving: boolean;
@@ -1266,6 +1269,10 @@ function SessionEditModal({
   const [newProfitSharingType, setNewProfitSharingType] = useState<(typeof profitSharingCalculationTypes)[number]>("fixed");
   const [newParticipants, setNewParticipants] = useState<ParticipantDraft[]>(() => makeParticipants(1, String(session.defaultSlotPrice ?? 0), firstAccountId));
   const [newParticipantDetailId, setNewParticipantDetailId] = useState<string | null>(null);
+  const [venueInput, setVenueInput] = useState(session.venue ?? "");
+  const [selectedCourtMemberPackageId, setSelectedCourtMemberPackageId] = useState(session.courtMemberPackageId ?? "");
+  const [memberUsageHoursInput, setMemberUsageHoursInput] = useState(String(session.memberUsageHours ?? 0));
+  const [courtPriceInput, setCourtPriceInput] = useState(String(session.courtPrice ?? 0));
   const newParticipantDetail = newParticipantDetailId ? newParticipants.find((participant) => participant.id === newParticipantDetailId) ?? null : null;
   const paidTotal = payments.reduce((sum, payment) => sum + (payment.status === "Lunas" ? payment.total : 0), 0);
   const outstandingTotal = payments.reduce((sum, payment) => sum + (payment.status === "Belum" ? payment.total : 0), 0);
@@ -1286,6 +1293,36 @@ function SessionEditModal({
     setAddingParticipants(false);
     setNewParticipants(makeParticipants(1, String(session.defaultSlotPrice ?? 0), firstAccountId));
   }
+
+  useEffect(() => {
+    setVenueInput(session.venue ?? "");
+    setSelectedCourtMemberPackageId(session.courtMemberPackageId ?? "");
+    setMemberUsageHoursInput(String(session.memberUsageHours ?? 0));
+    setCourtPriceInput(String(session.courtPrice ?? 0));
+  }, [session.id, session.venue, session.courtMemberPackageId, session.memberUsageHours, session.courtPrice]);
+
+  const normalizedVenue = venueInput.trim().replace(/\s+/g, " ").toLocaleLowerCase("id");
+  const selectedPackage = selectedCourtMemberPackageId
+    ? courtMemberPackages.find((item) => item.id === selectedCourtMemberPackageId) ?? null
+    : null;
+  const selectedPackageNormalizedVenue = selectedPackage?.venue.trim().replace(/\s+/g, " ").toLocaleLowerCase("id") ?? "";
+  const selectedPackageVenueMismatch = Boolean(selectedPackage && normalizedVenue && selectedPackageNormalizedVenue !== normalizedVenue);
+  const activeSelectedPackage = selectedPackageVenueMismatch ? null : selectedPackage;
+
+  useEffect(() => {
+    if (selectedPackageVenueMismatch) {
+      setSelectedCourtMemberPackageId("");
+    }
+  }, [selectedPackageVenueMismatch]);
+
+  useEffect(() => {
+    if (!activeSelectedPackage) return;
+    const usageHours = Number(memberUsageHoursInput || 0);
+    const safeHours = Number.isFinite(usageHours) ? Math.max(0, usageHours) : 0;
+    const hourlyRate = activeSelectedPackage.totalHours > 0 ? activeSelectedPackage.totalAmount / activeSelectedPackage.totalHours : 0;
+    const computedCourtPrice = Math.round(hourlyRate * safeHours);
+    setCourtPriceInput(String(computedCourtPrice));
+  }, [activeSelectedPackage, memberUsageHoursInput]);
 
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
@@ -1311,12 +1348,26 @@ function SessionEditModal({
               <label>Tanggal<input name="date" type="date" defaultValue={session.date} required /></label>
               <label>Jam<input name="time" type="time" defaultValue={session.time ?? ""} /></label>
               <label>Kode sesi<input name="code" defaultValue={session.code} required /></label>
-              <label>Venue<input name="venue" defaultValue={session.venue ?? ""} /></label>
+              <label>Venue<input name="venue" value={venueInput} onChange={(event) => setVenueInput(event.target.value)} /></label>
               <label>Harga slot default<MoneyInput name="defaultSlotPrice" defaultValue={session.defaultSlotPrice} /></label>
-              <label>Harga lapangan<MoneyInput name="courtPrice" defaultValue={session.courtPrice} /></label>
+              <label>Harga lapangan<MoneyInput name="courtPrice" value={courtPriceInput} onValueChange={setCourtPriceInput} disabled={Boolean(activeSelectedPackage)} /></label>
               <label>Akun biaya lapangan<select name="courtExpenseAccountId" defaultValue={session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? ""}>{accountOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-              <label>Paket member<Select name="courtMemberPackageId" options={courtMemberPackageOptions} value={session.courtMemberPackageId ?? ""} /></label>
-              <label>Jam pakai member<input name="memberUsageHours" type="number" min={0} step="0.25" defaultValue={session.memberUsageHours ?? 0} /></label>
+              <label>
+                Paket member
+                <select name="courtMemberPackageId" value={selectedCourtMemberPackageId} onChange={(event) => setSelectedCourtMemberPackageId(event.target.value)}>
+                  <option value="">Tanpa paket member</option>
+                  {courtMemberPackages.map((item) => {
+                    const packageNormalizedVenue = item.venue.trim().replace(/\s+/g, " ").toLocaleLowerCase("id");
+                    const venueMismatch = Boolean(normalizedVenue) && packageNormalizedVenue !== normalizedVenue;
+                    return (
+                      <option key={item.id} value={item.id} disabled={venueMismatch}>
+                        {item.name} ({item.venue}){venueMismatch ? " - venue tidak cocok" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
+              <label>Jam pakai member<input name="memberUsageHours" type="number" min={0} step={1} value={memberUsageHoursInput} onChange={(event) => setMemberUsageHoursInput(event.target.value)} /></label>
               <label>Status<select name="active" defaultValue={String(session.active)}><option value="true">Aktif</option><option value="false">Nonaktif</option></select></label>
               <label className="checkbox inline-checkbox"><input name="courtFree" type="checkbox" defaultChecked={session.courtFree} /> Lapangan free</label>
               {isSaving ? <p className="inline-status wide-field">Menyimpan perubahan sesi...</p> : null}
