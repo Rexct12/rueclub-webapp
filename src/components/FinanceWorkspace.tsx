@@ -42,6 +42,7 @@ type SessionDraft = {
   courtPrice: string;
   courtFree: boolean;
   courtExpenseAccountId: string;
+  courtMemberPackageId: string;
   totalDurationHours: string;
   memberUsageHours: string;
 };
@@ -332,6 +333,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     courtPrice: "0",
     courtFree: false,
     courtExpenseAccountId: firstAccountId,
+    courtMemberPackageId: "",
     totalDurationHours: "1",
     memberUsageHours: "0",
   }));
@@ -477,6 +479,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       courtPrice: "0",
       courtFree: false,
       courtExpenseAccountId: firstAccountId,
+      courtMemberPackageId: "",
       totalDurationHours: "1",
       memberUsageHours: "0",
     };
@@ -581,6 +584,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
             courtPrice: String(payload.courtPrice ?? 0),
               courtFree: Boolean(payload.courtFree),
               courtExpenseAccountId: String(payload.courtExpenseAccountId ?? ""),
+              courtMemberPackageId: String(payload.courtMemberPackageId ?? ""),
               totalDurationHours: String(payload.totalDurationHours ?? 1),
               memberUsageHours: String(payload.memberUsageHours ?? 0),
             },
@@ -1146,7 +1150,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         <SettingsPanel colorMode={colorMode} dateFormat={dateFormat} onColorModeChange={setColorMode} onDateFormatChange={setDateFormat} onSessionCodeFormatChange={setSessionCodeFormat} onTimeFormatChange={setTimeFormat} sessionCodeFormat={sessionCodeFormat} timeFormat={timeFormat} />
       </section>
 
-      {wizardOpen ? <SessionWizard accountOptions={accountOptions} dateFormat={dateFormat} error={wizardError} expenses={initialExpenses} isSaving={savingWizard} onClose={() => setWizardOpen(false)} onExpenseChange={setInitialExpenses} onParticipantDetail={(id) => openDetail("wizard", id)} onParticipantsChange={setWizardParticipants} onSave={saveWizard} onSessionChange={onWizardSessionChange} onSessionCodeGenerate={onWizardSessionCodeGenerate} onSessionCodeInput={onWizardSessionCodeInput} onStepBack={() => { setWizardError(null); setWizardStep((step) => Math.max(1, step - 1) as Step); }} onStepNext={nextStep} onStepSelect={goToWizardStep} participants={wizardParticipants} session={sessionDraft} step={wizardStep} timeFormat={timeFormat} /> : null}
+      {wizardOpen ? <SessionWizard accountOptions={accountOptions} courtMemberPackageOptions={courtMemberPackageOptions} dateFormat={dateFormat} error={wizardError} expenses={initialExpenses} isSaving={savingWizard} onClose={() => setWizardOpen(false)} onExpenseChange={setInitialExpenses} onParticipantDetail={(id) => openDetail("wizard", id)} onParticipantsChange={setWizardParticipants} onSave={saveWizard} onSessionChange={onWizardSessionChange} onSessionCodeGenerate={onWizardSessionCodeGenerate} onSessionCodeInput={onWizardSessionCodeInput} onStepBack={() => { setWizardError(null); setWizardStep((step) => Math.max(1, step - 1) as Step); }} onStepNext={nextStep} onStepSelect={goToWizardStep} participants={wizardParticipants} session={sessionDraft} step={wizardStep} timeFormat={timeFormat} /> : null}
       {editingSession ? (
         <SessionEditModal
           accountOptions={accountOptions}
@@ -1179,6 +1183,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
 
 function SessionWizard({
   accountOptions,
+  courtMemberPackageOptions,
   dateFormat,
   error,
   expenses,
@@ -1200,6 +1205,7 @@ function SessionWizard({
   timeFormat,
 }: {
   accountOptions: Array<[string, string]>;
+  courtMemberPackageOptions: Array<[string, string]>;
   dateFormat: DateFormat;
   error: string | null;
   expenses: ExpenseDraft[];
@@ -1241,10 +1247,11 @@ function SessionWizard({
             <label>Jam sesi<input type="time" value={session.time} onChange={(event) => onSessionChange({ ...session, time: event.target.value })} /></label>
             <label>Kode sesi<div className="session-code-input"><input value={session.code} onChange={(event) => onSessionCodeInput(event.target.value)} placeholder="venuecode-mmyy-nnn" required /><button type="button" className="secondary-button" onClick={onSessionCodeGenerate}>Auto</button></div></label>
             <label>Venue<input value={session.venue} onChange={(event) => onSessionChange({ ...session, venue: event.target.value })} placeholder="Kaya Padel" /></label>
+            <label>Paket member<Select options={courtMemberPackageOptions} value={session.courtMemberPackageId} onChange={(value) => onSessionChange({ ...session, courtMemberPackageId: value, memberUsageHours: value ? session.memberUsageHours : "0" })} /></label>
             <label>Harga slot default<MoneyInput value={session.defaultSlotPrice} onValueChange={(value) => onSessionChange({ ...session, defaultSlotPrice: value })} /></label>
             <label>Harga lapangan<MoneyInput value={session.courtPrice} onValueChange={(value) => onSessionChange({ ...session, courtPrice: value })} disabled={session.courtFree} /></label>
             <label>Durasi Total (jam)<input type="number" min={1} step={0.25} value={session.totalDurationHours} onChange={(event) => onSessionChange({ ...session, totalDurationHours: event.target.value })} /></label>
-            <label>Durasi Member (jam)<input type="number" min={0} step={0.25} max={session.totalDurationHours || undefined} value={session.memberUsageHours} onChange={(event) => onSessionChange({ ...session, memberUsageHours: event.target.value })} /></label>
+            <label>Durasi Member (jam)<input type="number" min={0} step={0.25} max={session.totalDurationHours || undefined} value={session.memberUsageHours} onChange={(event) => onSessionChange({ ...session, memberUsageHours: event.target.value })} disabled={!session.courtMemberPackageId} /></label>
             <label>Akun biaya lapangan<Select options={accountOptions} value={session.courtExpenseAccountId} onChange={(value) => onSessionChange({ ...session, courtExpenseAccountId: value })} /></label>
             <label className="checkbox inline-checkbox"><input type="checkbox" checked={session.courtFree} onChange={(event) => onSessionChange({ ...session, courtFree: event.target.checked })} /> Lapangan free</label>
           </div>

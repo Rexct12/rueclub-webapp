@@ -126,6 +126,19 @@ label {
   place-items: center;
 }
 
+.session-code-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.session-code-input .secondary-button {
+  min-height: 42px;
+  padding-inline: 14px;
+  white-space: nowrap;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
