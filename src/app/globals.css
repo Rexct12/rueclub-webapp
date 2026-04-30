@@ -107,6 +107,25 @@ label {
   font-size: 0.86rem;
 }
 
+.input-with-suffix {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-with-suffix span {
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 86%, var(--line));
+  color: var(--muted);
+  font-size: 0.86rem;
+  display: grid;
+  place-items: center;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

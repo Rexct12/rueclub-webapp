@@ -1397,7 +1397,7 @@ function SessionEditModal({
                 </select>
               </label>
               {!selectedCourtMemberPackageId ? <input type="hidden" name="memberUsageHours" value="0" /> : null}
-              <label>Jam pakai member<input name="memberUsageHours" type="number" min={0} step={1} value={memberUsageHoursInput} onChange={(event) => setMemberUsageHoursInput(event.target.value)} /></label>
+              <label>Durasi<div className="input-with-suffix"><input name="memberUsageHours" type="number" min={0} step={1} value={memberUsageHoursInput} onChange={(event) => setMemberUsageHoursInput(event.target.value)} /><span>Jam</span></div></label>
               <label>Status<select name="active" defaultValue={String(session.active)}><option value="true">Aktif</option><option value="false">Nonaktif</option></select></label>
               <label className="checkbox inline-checkbox"><input name="courtFree" type="checkbox" defaultChecked={session.courtFree} /> Lapangan free</label>
               {isSaving ? <p className="inline-status wide-field">Menyimpan perubahan sesi...</p> : null}
@@ -1767,7 +1767,7 @@ function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions,
           <MoneyInput name="courtPrice" placeholder="Harga lapangan" defaultValue={0} />
           <Select name="courtExpenseAccountId" options={accountOptions} />
           <Select name="courtMemberPackageId" options={courtMemberPackageOptions} />
-          <input name="memberUsageHours" type="number" min={0} step="0.25" placeholder="Jam pakai member (opsional)" defaultValue={0} />
+          <input name="memberUsageHours" type="number" min={0} step="0.25" placeholder="Durasi (Jam, opsional)" defaultValue={0} />
           <label className="checkbox"><input name="courtFree" type="checkbox" /> Lapangan free</label>
           <button type="submit">Simpan Sesi</button>
         </form>
