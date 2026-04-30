@@ -1172,27 +1172,38 @@ th {
 
 .session-card-main {
   grid-area: meta;
+  display: grid;
+  grid-template-rows: minmax(30px, auto) auto auto auto;
+  align-content: start;
+  gap: 6px;
   min-width: 0;
+}
+
+.session-card-member-status {
+  display: flex;
+  align-items: flex-start;
+  min-height: 30px;
 }
 
 .session-card-main-head {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
-  justify-content: space-between;
 }
 
 .session-member-badge {
-  display: inline-flex;
-  align-items: center;
+  display: inline-block;
+  max-width: 100%;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 0.75rem;
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.25;
   padding: 6px 10px;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .session-member-badge.member {
@@ -1244,6 +1255,7 @@ th {
 .session-card h3 {
   font-size: 1.5rem;
   line-height: 1.05;
+  margin-top: 0;
 }
 
 .session-card-stats,
@@ -1670,6 +1682,15 @@ th {
     padding: 16px;
   }
 
+  .session-card-main {
+    grid-template-rows: auto auto auto auto;
+    gap: 5px;
+  }
+
+  .session-card-member-status {
+    min-height: 0;
+  }
+
   .session-card-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1697,7 +1718,7 @@ th {
 
   .session-member-badge {
     width: 100%;
-    justify-content: center;
+    text-align: center;
   }
 
   .participant-edit-main,

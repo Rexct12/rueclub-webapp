@@ -1014,9 +1014,11 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
               return (
                 <article className="session-card" key={session.id}>
                   <div className="session-card-main">
+                    <div className="session-card-member-status" aria-label={memberStatusLabel}>
+                      <span className={`session-member-badge ${memberPackage ? "member" : "non-member"}`}>{memberStatusLabel}</span>
+                    </div>
                     <div className="session-card-main-head">
                       <p className="eyebrow">Kode sesi</p>
-                      <span className={`session-member-badge ${memberPackage ? "member" : "non-member"}`}>{memberStatusLabel}</span>
                     </div>
                     <h3>{session.code}</h3>
                     <p className="table-subtext">Harga slot {formatCurrency(session.defaultSlotPrice)}</p>
