@@ -266,6 +266,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const [sessionCodeFormat, setSessionCodeFormat] = useState<SessionCodeFormat>(() => readSessionCodeFormat());
   const [sessionSortKey, setSessionSortKey] = useState<SessionSortKey>("date");
   const [sessionSortDirection, setSessionSortDirection] = useState<SortDirection>("desc");
+  const [sessionVenueFilter, setSessionVenueFilter] = useState("all");
   const [isPending, startTransition] = useTransition();
   const today = todayInBangkok();
 
@@ -352,8 +353,20 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     return map;
   }, [data.participantPayments]);
   const venueSortCollator = useMemo(() => new Intl.Collator("id", { sensitivity: "base", numeric: true }), []);
+  const sessionVenueOptions = useMemo(() => {
+    const venues = new Set<string>();
+    for (const session of activeSessions) {
+      const value = (session.venue ?? "").trim();
+      if (value) venues.add(value);
+    }
+    return ["all", ...Array.from(venues).sort((a, b) => venueSortCollator.compare(a, b))];
+  }, [activeSessions, venueSortCollator]);
+  const filteredActiveSessions = useMemo(() => {
+    if (sessionVenueFilter === "all") return activeSessions;
+    return activeSessions.filter((session) => (session.venue ?? "").trim() === sessionVenueFilter);
+  }, [activeSessions, sessionVenueFilter]);
   const sortedActiveSessions = useMemo(() => {
-    const sessions = [...activeSessions];
+    const sessions = [...filteredActiveSessions];
     sessions.sort((left, right) => {
       let compare = 0;
 
@@ -372,7 +385,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
       return sessionSortDirection === "asc" ? compare : -compare;
     });
     return sessions;
-  }, [activeSessions, reportBySessionId, sessionSortDirection, sessionSortKey, venueSortCollator]);
+  }, [filteredActiveSessions, reportBySessionId, sessionSortDirection, sessionSortKey, venueSortCollator]);
 
   const editingSession = editingSessionId ? data.sessions.find((session) => session.id === editingSessionId) ?? null : null;
   const editingSessionPayments = useMemo(() => editingSessionId ? data.participantPayments.filter((payment) => payment.sessionId === editingSessionId) : [], [data.participantPayments, editingSessionId]);
@@ -1032,6 +1045,13 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
                 <option value="date">Tanggal</option>
                 <option value="venue">Venue</option>
                 <option value="profit">Profit</option>
+              </select>
+            </label>
+            <label className="session-sort-field">Filter venue
+              <select value={sessionVenueFilter} onChange={(event) => setSessionVenueFilter(event.target.value)}>
+                {sessionVenueOptions.map((venue) => (
+                  <option key={venue} value={venue}>{venue === "all" ? "Semua Venue" : venue}</option>
+                ))}
               </select>
             </label>
             <div className="segmented-control session-sort-direction" role="group" aria-label="Arah urutan sesi berjalan">
