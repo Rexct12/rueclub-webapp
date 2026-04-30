@@ -123,6 +123,28 @@ function formatSessionTime(time: string | undefined, timeFormat: TimeFormat) {
   return `${displayHour}:${minute} ${period}`;
 }
 
+function formatSessionTimeRange(time: string | undefined, durationHours: number | undefined, timeFormat: TimeFormat) {
+  if (!time) return "";
+  const start = formatSessionTime(time, timeFormat);
+  const duration = Number(durationHours ?? 0);
+  if (!Number.isFinite(duration) || duration <= 0) return start;
+
+  const [hourText, minuteText = "0"] = time.split(":");
+  const startHour = Number(hourText);
+  const startMinute = Number(minuteText);
+  if (!Number.isFinite(startHour) || !Number.isFinite(startMinute)) return start;
+
+  const startTotalMinutes = startHour * 60 + startMinute;
+  const durationMinutes = Math.round(duration * 60);
+  const endTotalMinutes = startTotalMinutes + durationMinutes;
+  const normalizedEndMinutes = ((endTotalMinutes % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const endHour = Math.floor(normalizedEndMinutes / 60);
+  const endMinute = normalizedEndMinutes % 60;
+  const endTime = `${String(endHour).padStart(2, "0")}:${String(endMinute).padStart(2, "0")}`;
+  const end = formatSessionTime(endTime, timeFormat);
+  return `${start} - ${end}`;
+}
+
 function formatSessionDateTime(date: string, time: string | undefined, timeFormat: TimeFormat, dateFormat: DateFormat) {
   const formattedTime = formatSessionTime(time, timeFormat);
   const formattedDate = formatDisplayDate(date, dateFormat);
@@ -228,6 +250,10 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const activeCourtMemberPackages = useMemo(
     () => data.courtMemberPackages.filter((item) => item.active),
     [data.courtMemberPackages],
+  );
+  const courtMemberPackageById = useMemo(
+    () => new Map(activeCourtMemberPackages.map((item) => [item.id, item])),
+    [activeCourtMemberPackages],
   );
   const accountOptions = useMemo(() => activeAccounts.map((account): [string, string] => [account.id, account.name]), [activeAccounts]);
   const sessionOptions = useMemo(() => activeSessions.map((session): [string, string] => [session.id, session.code]), [activeSessions]);
@@ -942,10 +968,23 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
             {sortedActiveSessions.map((session) => {
               const sessionReport = reportBySessionId.get(session.id);
               const stats = paymentStatsBySession.get(session.id);
-              const sessionTime = formatSessionTime(session.time, timeFormat) || "-";
+              const sessionTime = formatSessionTimeRange(session.time, session.memberUsageHours, timeFormat) || "-";
+              const memberPackage = session.courtMemberPackageId
+                ? courtMemberPackageById.get(session.courtMemberPackageId)
+                : null;
+              const memberStatusLabel = memberPackage
+                ? `Paket member: ${memberPackage.name}`
+                : "Tanpa paket member";
               return (
                 <article className="session-card" key={session.id}>
-                  <div className="session-card-main"><p className="eyebrow">Kode sesi</p><h3>{session.code}</h3><p className="table-subtext">Harga slot {formatCurrency(session.defaultSlotPrice)}</p></div>
+                  <div className="session-card-main">
+                    <div className="session-card-main-head">
+                      <p className="eyebrow">Kode sesi</p>
+                      <span className={`session-member-badge ${memberPackage ? "member" : "non-member"}`}>{memberStatusLabel}</span>
+                    </div>
+                    <h3>{session.code}</h3>
+                    <p className="table-subtext">Harga slot {formatCurrency(session.defaultSlotPrice)}</p>
+                  </div>
                   <div className="session-card-stats"><MiniStat label="Tanggal" value={formatDisplayDate(session.date, dateFormat)} /><MiniStat label="Jam" value={sessionTime} /><MiniStat label="Slot" value={String(stats?.filled ?? 0)} /><MiniStat label="Expense" value={formatCurrency(sessionReport?.costOfService ?? 0)} /><MiniStat label="Profit" value={formatCurrency(sessionReport?.profit ?? 0)} tone={(sessionReport?.profit ?? 0) < 0 ? "bad" : "good"} /></div>
                   <div className="session-payment-strip"><span>Lunas {stats?.lunas ?? 0}</span><span>Belum {stats?.belum ?? 0}</span><span>Free {stats?.free ?? 0}</span><span>Diskon {formatCurrency(stats?.discount ?? 0)}</span></div>
                   <div className="session-card-actions"><button className="secondary-button" onClick={() => setEditingSessionId(session.id)}>Edit Sesi</button></div>

@@ -1175,6 +1175,38 @@ th {
   min-width: 0;
 }
 
+.session-card-main-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.session-member-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.session-member-badge.member {
+  border-color: color-mix(in srgb, var(--success) 45%, var(--line));
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--success);
+}
+
+.session-member-badge.non-member {
+  border-color: color-mix(in srgb, var(--muted) 38%, var(--line));
+  background: color-mix(in srgb, var(--muted) 10%, transparent);
+  color: var(--muted);
+}
+
 .session-card-actions,
 .modal-action-row {
   display: flex;
@@ -1224,13 +1256,17 @@ th {
 
 .session-card-stats {
   grid-area: stats;
-  grid-template-columns: minmax(118px, 150px) 82px 58px minmax(112px, 150px) minmax(112px, 150px);
-  justify-content: start;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  justify-content: stretch;
 }
 
 .session-card-stats .mini-stat {
   min-height: 58px;
   padding: 8px 10px;
+}
+
+.session-card-stats .mini-stat:nth-child(2) strong {
+  font-size: 0.9rem;
 }
 
 .session-card-stats .mini-stat span {
@@ -1586,7 +1622,7 @@ th {
   }
 
   .session-card-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1657,6 +1693,11 @@ th {
   .session-card-stats,
   .session-card-actions {
     grid-template-columns: 1fr;
+  }
+
+  .session-member-badge {
+    width: 100%;
+    justify-content: center;
   }
 
   .participant-edit-main,
