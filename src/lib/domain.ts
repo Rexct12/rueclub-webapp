@@ -40,6 +40,23 @@ const paymentMethodSchema = z.preprocess(
   z.enum(paymentMethods).optional(),
 );
 
+function normalizeSessionTotalDurationHours(
+  totalDurationHours: unknown,
+  memberUsageHours: unknown,
+): number {
+  const parsedTotalDuration = Number(totalDurationHours);
+  if (Number.isFinite(parsedTotalDuration) && parsedTotalDuration > 0) {
+    return parsedTotalDuration;
+  }
+
+  const parsedMemberUsage = Number(memberUsageHours);
+  if (Number.isFinite(parsedMemberUsage) && parsedMemberUsage > 0) {
+    return parsedMemberUsage;
+  }
+
+  return 1;
+}
+
 export const accountSchema = z.object({
   id: z.string(),
   name: requiredText,
@@ -79,9 +96,10 @@ export const sessionInputSchema = z
     if (!input || typeof input !== "object") return input;
     const source = input as Record<string, unknown>;
     const next = { ...source };
-    if (next.totalDurationHours == null) {
-      next.totalDurationHours = next.memberUsageHours ?? 1;
-    }
+    next.totalDurationHours = normalizeSessionTotalDurationHours(
+      next.totalDurationHours,
+      next.memberUsageHours,
+    );
     if (!next.courtMemberPackageId) {
       next.memberUsageHours = 0;
     }

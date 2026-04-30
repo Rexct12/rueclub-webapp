@@ -143,6 +143,56 @@ function parseSessionWithCompatibility(value: unknown): Session {
   });
 }
 
+function shouldSanitizeLegacySessionDuration(value: unknown): boolean {
+  if (value == null || value === "") return true;
+  const numeric = Number(value);
+  return !Number.isFinite(numeric) || numeric <= 0;
+}
+
+async function readSessionsWithCompatibility(): Promise<Session[]> {
+  if (shouldUseLocalStore()) {
+    const store = await readLocalStore();
+    const rows = store.sessions as unknown[];
+    const parsed: Session[] = [];
+    let touched = false;
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const source = (rows[index] ?? {}) as Record<string, unknown>;
+      const normalized = parseSessionWithCompatibility(source);
+      parsed.push(normalized);
+
+      if (shouldSanitizeLegacySessionDuration(source.totalDurationHours)) {
+        rows[index] = normalized;
+        touched = true;
+      }
+    }
+
+    if (touched) {
+      await writeLocalStore(store);
+    }
+
+    return parsed;
+  }
+
+  const snapshot = await getAdminDb().collection("sessions").get();
+  const parsed = await Promise.all(
+    snapshot.docs.map(async (doc) => {
+      const source = Object.fromEntries(
+        Object.entries(doc.data()).map(([key, value]) => [key, reviveFirestoreValue(value)]),
+      ) as Record<string, unknown>;
+      const normalized = parseSessionWithCompatibility({ id: doc.id, ...source });
+
+      if (shouldSanitizeLegacySessionDuration(source.totalDurationHours)) {
+        await saveDocument("sessions", normalized);
+      }
+
+      return normalized;
+    }),
+  );
+
+  return parsed;
+}
+
 async function saveDocument<T extends { id: string }>(
   collection: CollectionName,
   value: T,
@@ -182,7 +232,7 @@ export async function deleteDocument(collection: CollectionName, id: string) {
 export async function getAppData(): Promise<AppData> {
   const [accounts, sessions, participantPayments, expenses, courtMemberPackages, capitalDeposits, profitSharings] = await Promise.all([
     readCollection("accounts", accountSchema.parse),
-    readCollection("sessions", parseSessionWithCompatibility),
+    readSessionsWithCompatibility(),
     readCollection("participantPayments", participantPaymentSchema.parse),
     readCollection("expenses", expenseSchema.parse),
     readCollection("courtMemberPackages", courtMemberPackageSchema.parse),
