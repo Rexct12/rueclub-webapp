@@ -31,7 +31,18 @@ const dateFormatOptions = [
 ] as const;
 type DateFormat = (typeof dateFormatOptions)[number][0];
 type Step = 1 | 2 | 3 | 4;
-type SessionDraft = { date: string; time: string; code: string; venue: string; defaultSlotPrice: string; courtPrice: string; courtFree: boolean; courtExpenseAccountId: string };
+type SessionDraft = {
+  date: string;
+  time: string;
+  code: string;
+  venue: string;
+  defaultSlotPrice: string;
+  courtPrice: string;
+  courtFree: boolean;
+  courtExpenseAccountId: string;
+  totalDurationHours: string;
+  memberUsageHours: string;
+};
 type ExpenseDraft = { id: string; category: string; description: string; amount: string; accountId: string; notes: string };
 type ParticipantDraft = { id: string; username: string; idReclub: string; instagram: string; whatsapp: string; category: string; slotPrice: string; discount: string; status: string; method: string; accountId: string; notes: string };
 
@@ -268,7 +279,18 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   );
   const firstAccountId = activeAccounts[0]?.id ?? "";
 
-  const [sessionDraft, setSessionDraft] = useState<SessionDraft>(() => ({ date: today, time: "", code: "", venue: "", defaultSlotPrice: "0", courtPrice: "0", courtFree: false, courtExpenseAccountId: firstAccountId }));
+  const [sessionDraft, setSessionDraft] = useState<SessionDraft>(() => ({
+    date: today,
+    time: "",
+    code: "",
+    venue: "",
+    defaultSlotPrice: "0",
+    courtPrice: "0",
+    courtFree: false,
+    courtExpenseAccountId: firstAccountId,
+    totalDurationHours: "1",
+    memberUsageHours: "0",
+  }));
   const [initialExpenses, setInitialExpenses] = useState<ExpenseDraft[]>(() => makeExpenses(firstAccountId));
   const [wizardParticipants, setWizardParticipants] = useState<ParticipantDraft[]>(() => makeParticipants(8, "0", firstAccountId));
   const [quickParticipants, setQuickParticipants] = useState<ParticipantDraft[]>(() => makeParticipants(8, "0", firstAccountId));
@@ -363,7 +385,18 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   }
 
   function openWizard() {
-    const initialDraft: SessionDraft = { date: today, time: "", code: "", venue: "", defaultSlotPrice: "0", courtPrice: "0", courtFree: false, courtExpenseAccountId: firstAccountId };
+    const initialDraft: SessionDraft = {
+      date: today,
+      time: "",
+      code: "",
+      venue: "",
+      defaultSlotPrice: "0",
+      courtPrice: "0",
+      courtFree: false,
+      courtExpenseAccountId: firstAccountId,
+      totalDurationHours: "1",
+      memberUsageHours: "0",
+    };
     const initialCode = generateCodeByDraft(initialDraft);
     setWizardStep(1);
     setWizardError(null);
@@ -442,6 +475,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         courtFree: formData.get("courtFree") === "on",
         courtExpenseAccountId: formData.get("courtExpenseAccountId") || undefined,
         courtMemberPackageId: formData.get("courtMemberPackageId") || undefined,
+        totalDurationHours: Number(formData.get("totalDurationHours") ?? 1),
         memberUsageHours: Number(formData.get("memberUsageHours") ?? 0),
         active: formData.get("active") !== "false",
         sessionCodeFormat,
@@ -458,11 +492,13 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
             venue: String(payload.venue ?? ""),
             defaultSlotPrice: String(payload.defaultSlotPrice ?? 0),
             courtPrice: String(payload.courtPrice ?? 0),
-            courtFree: Boolean(payload.courtFree),
-            courtExpenseAccountId: String(payload.courtExpenseAccountId ?? ""),
-          },
-          String(payload.id ?? "") || undefined,
-        );
+              courtFree: Boolean(payload.courtFree),
+              courtExpenseAccountId: String(payload.courtExpenseAccountId ?? ""),
+              totalDurationHours: String(payload.totalDurationHours ?? 1),
+              memberUsageHours: String(payload.memberUsageHours ?? 0),
+            },
+            String(payload.id ?? "") || undefined,
+          );
       }
     }
     try {
@@ -968,7 +1004,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
             {sortedActiveSessions.map((session) => {
               const sessionReport = reportBySessionId.get(session.id);
               const stats = paymentStatsBySession.get(session.id);
-              const sessionTime = formatSessionTimeRange(session.time, session.memberUsageHours, timeFormat) || "-";
+              const sessionTime = formatSessionTimeRange(session.time, session.totalDurationHours, timeFormat) || "-";
               const memberPackage = session.courtMemberPackageId
                 ? courtMemberPackageById.get(session.courtMemberPackageId)
                 : null;
@@ -1097,6 +1133,8 @@ function SessionWizard({
             <label>Venue<input value={session.venue} onChange={(event) => onSessionChange({ ...session, venue: event.target.value })} placeholder="Kaya Padel" /></label>
             <label>Harga slot default<MoneyInput value={session.defaultSlotPrice} onValueChange={(value) => onSessionChange({ ...session, defaultSlotPrice: value })} /></label>
             <label>Harga lapangan<MoneyInput value={session.courtPrice} onValueChange={(value) => onSessionChange({ ...session, courtPrice: value })} disabled={session.courtFree} /></label>
+            <label>Durasi Total (jam)<input type="number" min={1} step={0.25} value={session.totalDurationHours} onChange={(event) => onSessionChange({ ...session, totalDurationHours: event.target.value })} /></label>
+            <label>Durasi Member (jam)<input type="number" min={0} step={0.25} max={session.totalDurationHours || undefined} value={session.memberUsageHours} onChange={(event) => onSessionChange({ ...session, memberUsageHours: event.target.value })} /></label>
             <label>Akun biaya lapangan<Select options={accountOptions} value={session.courtExpenseAccountId} onChange={(value) => onSessionChange({ ...session, courtExpenseAccountId: value })} /></label>
             <label className="checkbox inline-checkbox"><input type="checkbox" checked={session.courtFree} onChange={(event) => onSessionChange({ ...session, courtFree: event.target.checked })} /> Lapangan free</label>
           </div>
@@ -1310,6 +1348,7 @@ function SessionEditModal({
   const [newParticipantDetailId, setNewParticipantDetailId] = useState<string | null>(null);
   const [venueInput, setVenueInput] = useState(session.venue ?? "");
   const [selectedCourtMemberPackageId, setSelectedCourtMemberPackageId] = useState(session.courtMemberPackageId ?? "");
+  const [totalDurationHoursInput, setTotalDurationHoursInput] = useState(String(session.totalDurationHours ?? 1));
   const [memberUsageHoursInput, setMemberUsageHoursInput] = useState(String(session.memberUsageHours ?? 0));
   const [courtPriceInput, setCourtPriceInput] = useState(String(session.courtPrice ?? 0));
   const [courtExpenseAccountIdInput, setCourtExpenseAccountIdInput] = useState(session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? "");
@@ -1337,10 +1376,11 @@ function SessionEditModal({
   useEffect(() => {
     setVenueInput(session.venue ?? "");
     setSelectedCourtMemberPackageId(session.courtMemberPackageId ?? "");
+    setTotalDurationHoursInput(String(session.totalDurationHours ?? 1));
     setMemberUsageHoursInput(String(session.memberUsageHours ?? 0));
     setCourtPriceInput(String(session.courtPrice ?? 0));
     setCourtExpenseAccountIdInput(session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? "");
-  }, [session.id, session.venue, session.courtMemberPackageId, session.memberUsageHours, session.courtPrice]);
+  }, [session.id, session.venue, session.courtMemberPackageId, session.totalDurationHours, session.memberUsageHours, session.courtPrice]);
 
   const normalizedVenue = venueInput.trim().replace(/\s+/g, " ").toLocaleLowerCase("id");
   const selectedPackage = selectedCourtMemberPackageId
@@ -1436,7 +1476,8 @@ function SessionEditModal({
                 </select>
               </label>
               {!selectedCourtMemberPackageId ? <input type="hidden" name="memberUsageHours" value="0" /> : null}
-              <label>Durasi<div className="input-with-suffix"><input name="memberUsageHours" type="number" min={0} step={1} value={memberUsageHoursInput} onChange={(event) => setMemberUsageHoursInput(event.target.value)} /><span>Jam</span></div></label>
+              <label>Durasi Total<div className="input-with-suffix"><input name="totalDurationHours" type="number" min={1} step={0.25} value={totalDurationHoursInput} onChange={(event) => setTotalDurationHoursInput(event.target.value)} /><span>Jam</span></div></label>
+              <label>Durasi Member<div className="input-with-suffix"><input name="memberUsageHours" type="number" min={0} step={0.25} max={totalDurationHoursInput || undefined} value={memberUsageHoursInput} onChange={(event) => setMemberUsageHoursInput(event.target.value)} /><span>Jam</span></div></label>
               <label>Status<select name="active" defaultValue={String(session.active)}><option value="true">Aktif</option><option value="false">Nonaktif</option></select></label>
               <label className="checkbox inline-checkbox"><input name="courtFree" type="checkbox" defaultChecked={session.courtFree} /> Lapangan free</label>
               {isSaving ? <p className="inline-status wide-field">Menyimpan perubahan sesi...</p> : null}
@@ -1806,7 +1847,8 @@ function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions,
           <MoneyInput name="courtPrice" placeholder="Harga lapangan" defaultValue={0} />
           <Select name="courtExpenseAccountId" options={accountOptions} />
           <Select name="courtMemberPackageId" options={courtMemberPackageOptions} />
-          <input name="memberUsageHours" type="number" min={0} step="0.25" placeholder="Durasi (Jam, opsional)" defaultValue={0} />
+          <input name="totalDurationHours" type="number" min={1} step="0.25" placeholder="Durasi Total (Jam)" defaultValue={1} />
+          <input name="memberUsageHours" type="number" min={0} step="0.25" placeholder="Durasi Member (Jam)" defaultValue={0} />
           <label className="checkbox"><input name="courtFree" type="checkbox" /> Lapangan free</label>
           <button type="submit">Simpan Sesi</button>
         </form>

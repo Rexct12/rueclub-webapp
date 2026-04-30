@@ -19,6 +19,7 @@ const data: AppData = {
       courtFree: false,
       courtExpenseAccountId: "bca",
       courtMemberPackageId: undefined,
+      totalDurationHours: 1,
       memberUsageHours: 0,
       active: true,
     },

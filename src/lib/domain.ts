@@ -48,7 +48,7 @@ export const accountSchema = z.object({
   active: z.boolean().default(true),
 });
 
-export const sessionSchema = z.object({
+const sessionBaseSchema = z.object({
   id: z.string(),
   date: dateStringSchema,
   time: optionalText,
@@ -59,9 +59,38 @@ export const sessionSchema = z.object({
   courtFree: z.boolean().default(false),
   courtExpenseAccountId: optionalText,
   courtMemberPackageId: optionalText,
+  totalDurationHours: z.coerce.number().finite().min(1),
   memberUsageHours: z.coerce.number().finite().min(0).default(0),
   active: z.boolean().default(true),
 });
+
+export const sessionSchema = sessionBaseSchema.superRefine((session, ctx) => {
+  if (session.memberUsageHours > session.totalDurationHours) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["memberUsageHours"],
+      message: "Durasi member tidak boleh melebihi durasi total sesi.",
+    });
+  }
+});
+
+export const sessionInputSchema = z
+  .preprocess((input) => {
+    if (!input || typeof input !== "object") return input;
+    const source = input as Record<string, unknown>;
+    const next = { ...source };
+    if (next.totalDurationHours == null) {
+      next.totalDurationHours = next.memberUsageHours ?? 1;
+    }
+    if (!next.courtMemberPackageId) {
+      next.memberUsageHours = 0;
+    }
+    return next;
+  }, sessionBaseSchema.omit({ id: true }))
+  .transform((session) => ({
+    ...session,
+    memberUsageHours: session.courtMemberPackageId ? session.memberUsageHours : 0,
+  }));
 
 export const userSchema = z.object({
   id: z.string(),
@@ -255,6 +284,7 @@ export const aiDraftSchema = z.object({
 
 export type Account = z.infer<typeof accountSchema>;
 export type Session = z.infer<typeof sessionSchema>;
+export type SessionInput = z.infer<typeof sessionInputSchema>;
 export type User = z.infer<typeof userSchema>;
 export type ParticipantPaymentInput = z.infer<typeof participantPaymentInputSchema>;
 export type ExpenseInput = z.infer<typeof expenseInputSchema>;

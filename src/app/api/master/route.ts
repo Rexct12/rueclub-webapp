@@ -83,6 +83,7 @@ export async function POST(request: Request) {
         courtFree: Boolean(body.courtFree),
         courtExpenseAccountId: body.courtExpenseAccountId,
         courtMemberPackageId: body.courtMemberPackageId,
+        totalDurationHours: Number(body.totalDurationHours ?? body.memberUsageHours ?? 1),
         memberUsageHours: Number(body.memberUsageHours ?? 0),
         active: body.active ?? true,
       }, user.id);

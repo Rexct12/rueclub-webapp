@@ -14,6 +14,7 @@ import {
   participantPaymentSchema,
   profitSharingInputSchema,
   profitSharingSchema,
+  sessionInputSchema,
   sessionSchema,
   slugId,
   type Account,
@@ -133,6 +134,15 @@ async function readCollection<T>(
   });
 }
 
+function parseSessionWithCompatibility(value: unknown): Session {
+  const source = value as Record<string, unknown>;
+  const parsedInput = sessionInputSchema.parse(source);
+  return sessionSchema.parse({
+    ...parsedInput,
+    id: String(source.id ?? crypto.randomUUID()),
+  });
+}
+
 async function saveDocument<T extends { id: string }>(
   collection: CollectionName,
   value: T,
@@ -172,7 +182,7 @@ export async function deleteDocument(collection: CollectionName, id: string) {
 export async function getAppData(): Promise<AppData> {
   const [accounts, sessions, participantPayments, expenses, courtMemberPackages, capitalDeposits, profitSharings] = await Promise.all([
     readCollection("accounts", accountSchema.parse),
-    readCollection("sessions", sessionSchema.parse),
+    readCollection("sessions", parseSessionWithCompatibility),
     readCollection("participantPayments", participantPaymentSchema.parse),
     readCollection("expenses", expenseSchema.parse),
     readCollection("courtMemberPackages", courtMemberPackageSchema.parse),
@@ -230,8 +240,9 @@ export async function upsertAccount(account: Omit<Account, "id"> & { id?: string
 }
 
 export async function upsertSession(session: Omit<Session, "id"> & { id?: string }, userId = "system") {
+  const parsedInput = sessionInputSchema.parse(session);
   const value = sessionSchema.parse({
-    ...session,
+    ...parsedInput,
     id: session.id ?? crypto.randomUUID(),
   });
   const saved = await saveDocument("sessions", value);
@@ -242,6 +253,7 @@ export async function upsertSession(session: Omit<Session, "id"> & { id?: string
 export async function deleteSession(id: string) {
   await deleteDocument("sessions", id);
   await deleteDocument("expenses", sessionCourtExpenseId(id));
+  await deleteDocument("expenses", sessionCourtMemberUsageExpenseId(id));
 }
 
 export async function syncSessionParticipantSlotPricesWithDefaultChange(
@@ -282,66 +294,71 @@ function sessionCourtExpenseId(sessionId: string) {
   return `court-expense-${sessionId}`;
 }
 
-async function syncSessionCourtExpense(session: Session, userId: string) {
-  const expenseId = sessionCourtExpenseId(session.id);
+function sessionCourtMemberUsageExpenseId(sessionId: string) {
+  return `court-member-usage-expense-${sessionId}`;
+}
 
-  if (session.courtMemberPackageId && session.memberUsageHours > 0) {
+async function syncSessionCourtExpense(session: Session, userId: string) {
+  const regularExpenseId = sessionCourtExpenseId(session.id);
+  const memberExpenseId = sessionCourtMemberUsageExpenseId(session.id);
+  const hasMemberPackage = Boolean(session.courtMemberPackageId);
+  const memberDuration = hasMemberPackage ? Math.max(0, session.memberUsageHours) : 0;
+  const regularDuration = Math.max(0, session.totalDurationHours - memberDuration);
+  const allExpenses = await readCollection("expenses", expenseSchema.parse);
+
+  if (hasMemberPackage && memberDuration > 0) {
     const memberPackage = (await readCollection("courtMemberPackages", courtMemberPackageSchema.parse)).find(
       (row) => row.id === session.courtMemberPackageId,
     );
 
     if (!memberPackage) {
-      await deleteDocument("expenses", expenseId);
-      return;
+      await deleteDocument("expenses", memberExpenseId);
+    } else {
+      const hourlyRate = memberPackage.totalAmount / memberPackage.totalHours;
+      const memberAmount = Math.round(hourlyRate * memberDuration);
+      const timestamp = nowIso();
+      const existing = allExpenses.find((expense) => expense.id === memberExpenseId);
+
+      const value: Expense = expenseSchema.parse({
+        id: memberExpenseId,
+        date: session.date,
+        description: `Court Member Usage - ${session.code}`,
+        category: "Court",
+        sessionId: session.id,
+        amount: memberAmount,
+        accountId: memberPackage.expenseAccountId,
+        intent: "courtMemberUsage",
+        notes: `Auto-generated from member package ${memberPackage.name} (${memberDuration} jam)`,
+        reimbursed: false,
+        createdAt: existing?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+        createdBy: existing?.createdBy ?? userId,
+        updatedBy: userId,
+      });
+
+      await saveDocument("expenses", value);
     }
-
-    const hourlyRate = memberPackage.totalAmount / memberPackage.totalHours;
-    const calculatedAmount = Math.round(hourlyRate * session.memberUsageHours);
-    const timestamp = nowIso();
-    const existing = (await readCollection("expenses", expenseSchema.parse)).find(
-      (expense) => expense.id === expenseId,
-    );
-
-    const value: Expense = expenseSchema.parse({
-      id: expenseId,
-      date: session.date,
-      description: `Court Member Usage - ${session.code}`,
-      category: "Court",
-      sessionId: session.id,
-      amount: calculatedAmount,
-      accountId: memberPackage.expenseAccountId,
-      intent: "courtMemberUsage",
-      notes: `Auto-generated from member package ${memberPackage.name} (${session.memberUsageHours} jam)`,
-      reimbursed: false,
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-      createdBy: existing?.createdBy ?? userId,
-      updatedBy: userId,
-    });
-
-    await saveDocument("expenses", value);
-    return;
+  } else {
+    await deleteDocument("expenses", memberExpenseId);
   }
 
-  if (session.courtFree || session.courtPrice <= 0 || !session.courtExpenseAccountId) {
-    await deleteDocument("expenses", expenseId);
+  if (session.courtFree || regularDuration <= 0 || session.courtPrice <= 0 || !session.courtExpenseAccountId) {
+    await deleteDocument("expenses", regularExpenseId);
     return;
   }
 
   const timestamp = nowIso();
-  const existing = (await readCollection("expenses", expenseSchema.parse)).find(
-    (expense) => expense.id === expenseId,
-  );
+  const existing = allExpenses.find((expense) => expense.id === regularExpenseId);
   const value: Expense = expenseSchema.parse({
-    id: expenseId,
+    id: regularExpenseId,
     date: session.date,
     description: `Court - ${session.code}`,
     category: "Court",
     sessionId: session.id,
-    amount: session.courtPrice,
+    amount: Math.round(session.courtPrice * regularDuration),
     accountId: session.courtExpenseAccountId,
     intent: "operational",
-    notes: "Auto-generated from session court price",
+    notes: `Auto-generated from session court price (${regularDuration} jam reguler x ${session.courtPrice}/jam)`,
     reimbursed: false,
     createdAt: existing?.createdAt ?? timestamp,
     updatedAt: timestamp,
