@@ -1273,6 +1273,7 @@ function SessionEditModal({
   const [selectedCourtMemberPackageId, setSelectedCourtMemberPackageId] = useState(session.courtMemberPackageId ?? "");
   const [memberUsageHoursInput, setMemberUsageHoursInput] = useState(String(session.memberUsageHours ?? 0));
   const [courtPriceInput, setCourtPriceInput] = useState(String(session.courtPrice ?? 0));
+  const [courtExpenseAccountIdInput, setCourtExpenseAccountIdInput] = useState(session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? "");
   const newParticipantDetail = newParticipantDetailId ? newParticipants.find((participant) => participant.id === newParticipantDetailId) ?? null : null;
   const paidTotal = payments.reduce((sum, payment) => sum + (payment.status === "Lunas" ? payment.total : 0), 0);
   const outstandingTotal = payments.reduce((sum, payment) => sum + (payment.status === "Belum" ? payment.total : 0), 0);
@@ -1299,6 +1300,7 @@ function SessionEditModal({
     setSelectedCourtMemberPackageId(session.courtMemberPackageId ?? "");
     setMemberUsageHoursInput(String(session.memberUsageHours ?? 0));
     setCourtPriceInput(String(session.courtPrice ?? 0));
+    setCourtExpenseAccountIdInput(session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? "");
   }, [session.id, session.venue, session.courtMemberPackageId, session.memberUsageHours, session.courtPrice]);
 
   const normalizedVenue = venueInput.trim().replace(/\s+/g, " ").toLocaleLowerCase("id");
@@ -1312,8 +1314,15 @@ function SessionEditModal({
   useEffect(() => {
     if (selectedPackageVenueMismatch) {
       setSelectedCourtMemberPackageId("");
+      setMemberUsageHoursInput("0");
     }
   }, [selectedPackageVenueMismatch]);
+
+  useEffect(() => {
+    if (activeSelectedPackage) {
+      setCourtExpenseAccountIdInput(activeSelectedPackage.expenseAccountId);
+    }
+  }, [activeSelectedPackage]);
 
   useEffect(() => {
     if (!activeSelectedPackage) return;
@@ -1351,10 +1360,30 @@ function SessionEditModal({
               <label>Venue<input name="venue" value={venueInput} onChange={(event) => setVenueInput(event.target.value)} /></label>
               <label>Harga slot default<MoneyInput name="defaultSlotPrice" defaultValue={session.defaultSlotPrice} /></label>
               <label>Harga lapangan<MoneyInput name="courtPrice" value={courtPriceInput} onValueChange={setCourtPriceInput} disabled={Boolean(activeSelectedPackage)} /></label>
-              <label>Akun biaya lapangan<select name="courtExpenseAccountId" defaultValue={session.courtExpenseAccountId ?? accountOptions[0]?.[0] ?? ""}>{accountOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+              <label>Akun biaya lapangan
+                <select
+                  name="courtExpenseAccountId"
+                  value={courtExpenseAccountIdInput}
+                  onChange={(event) => setCourtExpenseAccountIdInput(event.target.value)}
+                  disabled={Boolean(activeSelectedPackage)}
+                >
+                  {accountOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              {activeSelectedPackage ? <input type="hidden" name="courtExpenseAccountId" value={courtExpenseAccountIdInput} /> : null}
               <label>
                 Paket member
-                <select name="courtMemberPackageId" value={selectedCourtMemberPackageId} onChange={(event) => setSelectedCourtMemberPackageId(event.target.value)}>
+                <select
+                  name="courtMemberPackageId"
+                  value={selectedCourtMemberPackageId}
+                  onChange={(event) => {
+                    const nextPackageId = event.target.value;
+                    setSelectedCourtMemberPackageId(nextPackageId);
+                    if (!nextPackageId) {
+                      setMemberUsageHoursInput("0");
+                    }
+                  }}
+                >
                   <option value="">Tanpa paket member</option>
                   {courtMemberPackages.map((item) => {
                     const packageNormalizedVenue = item.venue.trim().replace(/\s+/g, " ").toLocaleLowerCase("id");
@@ -1367,6 +1396,7 @@ function SessionEditModal({
                   })}
                 </select>
               </label>
+              {!selectedCourtMemberPackageId ? <input type="hidden" name="memberUsageHours" value="0" /> : null}
               <label>Jam pakai member<input name="memberUsageHours" type="number" min={0} step={1} value={memberUsageHoursInput} onChange={(event) => setMemberUsageHoursInput(event.target.value)} /></label>
               <label>Status<select name="active" defaultValue={String(session.active)}><option value="true">Aktif</option><option value="false">Nonaktif</option></select></label>
               <label className="checkbox inline-checkbox"><input name="courtFree" type="checkbox" defaultChecked={session.courtFree} /> Lapangan free</label>
