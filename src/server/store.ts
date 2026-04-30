@@ -37,6 +37,7 @@ import {
 import { defaultAccounts } from "@/lib/defaults";
 import { buildMigratedSessionCodes, DEFAULT_SESSION_CODE_FORMAT } from "@/lib/session-code";
 import { syncParticipantSlotPriceWithSessionDefault } from "@/lib/session-slot-sync";
+import { buildCourtMemberPackageUsageMap } from "@/lib/court-member-usage";
 import { getAdminDb, isFirebaseConfigured } from "@/server/firebase";
 
 type LocalStore = AppData & {
@@ -295,9 +296,43 @@ export async function upsertSession(session: Omit<Session, "id"> & { id?: string
     ...parsedInput,
     id: session.id ?? crypto.randomUUID(),
   });
+
+  await assertCourtMemberPackageUsageWithinLimit(value);
+
   const saved = await saveDocument("sessions", value);
   await syncSessionCourtExpense(saved, userId);
   return saved;
+}
+
+async function assertCourtMemberPackageUsageWithinLimit(session: Session) {
+  if (!session.courtMemberPackageId) return;
+
+  const [allSessions, courtMemberPackages] = await Promise.all([
+    readSessionsWithCompatibility(),
+    readCollection("courtMemberPackages", courtMemberPackageSchema.parse),
+  ]);
+  const selectedPackage = courtMemberPackages.find((row) => row.id === session.courtMemberPackageId);
+  if (!selectedPackage) {
+    throw new Error("Paket member yang dipilih tidak ditemukan.");
+  }
+
+  const usageMap = buildCourtMemberPackageUsageMap(allSessions, courtMemberPackages, session.id);
+  const usage = usageMap.get(selectedPackage.id) ?? {
+    usedHours: 0,
+    remainingHours: Math.max(0, selectedPackage.totalHours),
+  };
+
+  const requestedUsageHours = Math.max(0, session.memberUsageHours);
+
+  if (usage.remainingHours <= 0) {
+    throw new Error(`Paket member ${selectedPackage.name} sudah habis (sisa 0 jam).`);
+  }
+
+  if (requestedUsageHours > usage.remainingHours) {
+    throw new Error(
+      `Durasi member (${requestedUsageHours} jam) melebihi sisa paket ${selectedPackage.name} (${usage.remainingHours} jam).`,
+    );
+  }
 }
 
 export async function deleteSession(id: string) {

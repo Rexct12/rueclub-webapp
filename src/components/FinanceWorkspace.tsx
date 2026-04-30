@@ -23,6 +23,7 @@ type TimeFormat = "12h" | "24h";
 type ColorMode = "light" | "dark";
 type SessionSortKey = "date" | "venue" | "profit";
 type SortDirection = "asc" | "desc";
+type CourtMemberPackageUsageInfo = { usedHours: number; remainingHours: number };
 const dateFormatOptions = [
   ["yyyy-mm-dd", "YYYY-MM-DD"],
   ["dd-mm-yyyy", "DD-MM-YYYY"],
@@ -209,6 +210,35 @@ function participantSummary(rows: ParticipantDraft[]) {
   };
 }
 
+function computeCourtMemberPackageUsageMap(
+  sessions: Session[],
+  packages: CourtMemberPackage[],
+  excludeSessionId?: string,
+) {
+  const usedHoursByPackageId = new Map<string, number>();
+
+  for (const session of sessions) {
+    if (excludeSessionId && session.id === excludeSessionId) continue;
+    if (!session.courtMemberPackageId) continue;
+    const usedHours = Number.isFinite(session.memberUsageHours) ? Math.max(0, session.memberUsageHours) : 0;
+    usedHoursByPackageId.set(
+      session.courtMemberPackageId,
+      (usedHoursByPackageId.get(session.courtMemberPackageId) ?? 0) + usedHours,
+    );
+  }
+
+  const usageMap = new Map<string, CourtMemberPackageUsageInfo>();
+  for (const item of packages) {
+    const usedHours = usedHoursByPackageId.get(item.id) ?? 0;
+    usageMap.set(item.id, {
+      usedHours,
+      remainingHours: Math.max(0, item.totalHours - usedHours),
+    });
+  }
+
+  return usageMap;
+}
+
 export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const router = useRouter();
   const [toast, setToast] = useState<Toast | null>(null);
@@ -266,16 +296,25 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     () => new Map(activeCourtMemberPackages.map((item) => [item.id, item])),
     [activeCourtMemberPackages],
   );
+  const courtMemberPackageUsageMap = useMemo(
+    () => computeCourtMemberPackageUsageMap(data.sessions, activeCourtMemberPackages),
+    [data.sessions, activeCourtMemberPackages],
+  );
   const accountOptions = useMemo(() => activeAccounts.map((account): [string, string] => [account.id, account.name]), [activeAccounts]);
   const sessionOptions = useMemo(() => activeSessions.map((session): [string, string] => [session.id, session.code]), [activeSessions]);
   const courtMemberPackageOptions = useMemo(
     () => [
       ["", "Tanpa paket member"] as [string, string],
       ...activeCourtMemberPackages.map(
-        (item): [string, string] => [item.id, `${item.name} (${item.venue})`],
+        (item): [string, string] => {
+          const usage = courtMemberPackageUsageMap.get(item.id);
+          const remaining = usage?.remainingHours ?? item.totalHours;
+          const suffix = remaining <= 0 ? "Sisa 0 jam - jatah habis" : `Sisa ${remaining} jam`;
+          return [item.id, `${item.name} (${item.venue}) - ${suffix}`];
+        },
       ),
     ],
-    [activeCourtMemberPackages],
+    [activeCourtMemberPackages, courtMemberPackageUsageMap],
   );
   const firstAccountId = activeAccounts[0]?.id ?? "";
 
@@ -982,7 +1021,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         </section>
 
         <section className="session-workspace" id="input">
-          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} courtMemberPackageOptions={courtMemberPackageOptions} packageRows={activeCourtMemberPackages} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} savingCourtMemberPackage={savingCourtMemberPackage} deletingCourtMemberPackageId={deletingCourtMemberPackageId} onDeleteAccount={deleteAccount} onDeleteCourtMemberPackage={deleteCourtMemberPackage} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} onSaveCourtMemberPackage={submitCourtMemberPackage} /></details>
+          <details className="admin-drawer"><summary>Administrasi manual</summary><ManualAdminForms accounts={activeAccounts} courtMemberPackageOptions={courtMemberPackageOptions} packageRows={activeCourtMemberPackages} packageUsageMap={courtMemberPackageUsageMap} sessionCodeFormat={sessionCodeFormat} today={today} accountOptions={accountOptions} savingTransactionType={savingTransactionType} sessionOptions={sessionOptions} savingCourtMemberPackage={savingCourtMemberPackage} deletingCourtMemberPackageId={deletingCourtMemberPackageId} onDeleteAccount={deleteAccount} onDeleteCourtMemberPackage={deleteCourtMemberPackage} onSaveMaster={submitMaster} onSaveTransaction={submitTransaction} onSaveCourtMemberPackage={submitCourtMemberPackage} /></details>
           <div className="section-head horizontal-head">
             <div><h2>Sesi Berjalan</h2><p>Pilih sesi untuk cek slot terisi, expense, profit, dan pembayaran yang belum masuk.</p></div>
             <div className="session-section-actions"><button className="secondary-button" onClick={() => goToView("reports")}>Lihat Laporan</button><button onClick={openWizard}>Buat Sesi Baru</button></div>
@@ -1044,6 +1083,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         <SessionEditModal
           accountOptions={accountOptions}
           courtMemberPackages={activeCourtMemberPackages}
+          courtMemberPackageUsageMap={courtMemberPackageUsageMap}
           expenses={editingSessionExpenses}
           onClose={() => setEditingSessionId(null)}
           onDelete={deleteSession}
@@ -1303,6 +1343,7 @@ function ParticipantDetailModal({ participant, onChange, onClose }: { participan
 function SessionEditModal({
   accountOptions,
   courtMemberPackages,
+  courtMemberPackageUsageMap,
   courtMemberPackageOptions,
   expenses,
   isSaving,
@@ -1323,6 +1364,7 @@ function SessionEditModal({
 }: {
   accountOptions: Array<[string, string]>;
   courtMemberPackages: CourtMemberPackage[];
+  courtMemberPackageUsageMap: Map<string, CourtMemberPackageUsageInfo>;
   courtMemberPackageOptions: Array<[string, string]>;
   expenses: Expense[];
   isSaving: boolean;
@@ -1469,9 +1511,16 @@ function SessionEditModal({
                   {courtMemberPackages.map((item) => {
                     const packageNormalizedVenue = item.venue.trim().replace(/\s+/g, " ").toLocaleLowerCase("id");
                     const venueMismatch = Boolean(normalizedVenue) && packageNormalizedVenue !== normalizedVenue;
+                    const usage = courtMemberPackageUsageMap.get(item.id);
+                    const remainingHours = usage?.remainingHours ?? item.totalHours;
+                    const isDepleted = remainingHours <= 0;
+                    const isCurrentValue = item.id === selectedCourtMemberPackageId;
+                    const disabled = venueMismatch || (isDepleted && !isCurrentValue);
                     return (
-                      <option key={item.id} value={item.id} disabled={venueMismatch}>
-                        {item.name} ({item.venue}){venueMismatch ? " - venue tidak cocok" : ""}
+                      <option key={item.id} value={item.id} disabled={disabled}>
+                        {item.name} ({item.venue}) - Sisa {remainingHours} jam
+                        {venueMismatch ? " - venue tidak cocok" : ""}
+                        {isDepleted ? " - jatah habis" : ""}
                       </option>
                     );
                   })}
@@ -1790,7 +1839,7 @@ function ParticipantAppendModal({ accountOptions, onClose, onDetail, onParticipa
   );
 }
 
-function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions, onDeleteAccount, onDeleteCourtMemberPackage, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today, onSaveCourtMemberPackage, savingCourtMemberPackage, deletingCourtMemberPackageId, packageRows }: { accounts: Account[]; accountOptions: Array<[string, string]>; courtMemberPackageOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onDeleteCourtMemberPackage: (row: CourtMemberPackage) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string; onSaveCourtMemberPackage: (event: FormEvent<HTMLFormElement>) => void; savingCourtMemberPackage: boolean; deletingCourtMemberPackageId: string | null; packageRows: CourtMemberPackage[] }) {
+function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions, onDeleteAccount, onDeleteCourtMemberPackage, onSaveMaster, onSaveTransaction, savingTransactionType, sessionCodeFormat, sessionOptions, today, onSaveCourtMemberPackage, savingCourtMemberPackage, deletingCourtMemberPackageId, packageRows, packageUsageMap }: { accounts: Account[]; accountOptions: Array<[string, string]>; courtMemberPackageOptions: Array<[string, string]>; onDeleteAccount: (id: string, name: string) => void; onDeleteCourtMemberPackage: (row: CourtMemberPackage) => void; onSaveMaster: (event: FormEvent<HTMLFormElement>, type: "account" | "session") => void; onSaveTransaction: (event: FormEvent<HTMLFormElement>, type: "expense" | "capitalDeposit") => void; savingTransactionType: "expense" | "capitalDeposit" | null; sessionCodeFormat: SessionCodeFormat; sessionOptions: Array<[string, string]>; today: string; onSaveCourtMemberPackage: (event: FormEvent<HTMLFormElement>) => void; savingCourtMemberPackage: boolean; deletingCourtMemberPackageId: string | null; packageRows: CourtMemberPackage[]; packageUsageMap: Map<string, CourtMemberPackageUsageInfo> }) {
   return (
     <div className="manual-admin-grid">
       <FormPanel title="Beli Paket Member Court">
@@ -1808,10 +1857,15 @@ function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions,
         <div className="account-delete-list">
           {packageRows.map((row) => {
             const rate = row.totalHours > 0 ? Math.round(row.totalAmount / row.totalHours) : 0;
+            const usage = packageUsageMap.get(row.id);
+            const usedHours = usage?.usedHours ?? 0;
+            const remainingHours = usage?.remainingHours ?? row.totalHours;
             return (
               <div className="account-delete-row" key={row.id}>
                 <span>{row.name} - {row.venue}</span>
-                <small>{formatCurrency(row.totalAmount)} / {row.totalHours} jam ({formatCurrency(rate)}/jam)</small>
+                <small>
+                  {formatCurrency(row.totalAmount)} / {row.totalHours} jam ({formatCurrency(rate)}/jam) · Total {row.totalHours} · Terpakai {usedHours} · Sisa {remainingHours} jam
+                </small>
                 <button className="table-button" type="button" onClick={() => onDeleteCourtMemberPackage(row)} disabled={deletingCourtMemberPackageId !== null}>
                   {deletingCourtMemberPackageId === row.id ? "Menghapus..." : "Hapus"}
                 </button>
@@ -1848,7 +1902,19 @@ function ManualAdminForms({ accounts, accountOptions, courtMemberPackageOptions,
           <MoneyInput name="defaultSlotPrice" placeholder="Harga slot default" defaultValue={0} />
           <MoneyInput name="courtPrice" placeholder="Harga lapangan" defaultValue={0} />
           <Select name="courtExpenseAccountId" options={accountOptions} />
-          <Select name="courtMemberPackageId" options={courtMemberPackageOptions} />
+          <select name="courtMemberPackageId" defaultValue="">
+            <option value="">Tanpa paket member</option>
+            {packageRows.map((item) => {
+              const usage = packageUsageMap.get(item.id);
+              const remainingHours = usage?.remainingHours ?? item.totalHours;
+              const depleted = remainingHours <= 0;
+              return (
+                <option key={item.id} value={item.id} disabled={depleted}>
+                  {item.name} ({item.venue}) - Sisa {remainingHours} jam{depleted ? " - jatah habis" : ""}
+                </option>
+              );
+            })}
+          </select>
           <input name="totalDurationHours" type="number" min={1} step="0.25" placeholder="Durasi Total (Jam)" defaultValue={1} />
           <input name="memberUsageHours" type="number" min={0} step="0.25" placeholder="Durasi Member (Jam)" defaultValue={0} />
           <label className="checkbox"><input name="courtFree" type="checkbox" /> Lapangan free</label>
