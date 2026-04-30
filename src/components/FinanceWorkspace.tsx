@@ -48,6 +48,8 @@ type SessionDraft = {
 type ExpenseDraft = { id: string; category: string; description: string; amount: string; accountId: string; notes: string };
 type ParticipantDraft = { id: string; username: string; idReclub: string; instagram: string; whatsapp: string; category: string; slotPrice: string; discount: string; status: string; method: string; accountId: string; notes: string };
 
+const NO_MEMBER_PACKAGE_VALUE = "__none__";
+
 const navItems: Array<{ id: View; label: string; helper: string }> = [
   { id: "dashboard", label: "Dashboard", helper: "Ringkasan" },
   { id: "input", label: "Input", helper: "Sesi aktif" },
@@ -555,7 +557,11 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
         courtPrice: money(String(formData.get("courtPrice") ?? 0)),
         courtFree: formData.get("courtFree") === "on",
         courtExpenseAccountId: formData.get("courtExpenseAccountId") || undefined,
-        courtMemberPackageId: formData.get("courtMemberPackageId") || undefined,
+        courtMemberPackageId: (() => {
+          const raw = String(formData.get("courtMemberPackageId") ?? "").trim();
+          if (!raw || raw === NO_MEMBER_PACKAGE_VALUE) return undefined;
+          return raw;
+        })(),
         totalDurationHours: Number(formData.get("totalDurationHours") ?? 1),
         memberUsageHours: Number(formData.get("memberUsageHours") ?? 0),
         active: formData.get("active") !== "false",
@@ -1556,7 +1562,7 @@ function SessionEditModal({
                 </select>
               </label>
               {activeSelectedPackage ? <input type="hidden" name="courtExpenseAccountId" value={courtExpenseAccountIdInput} /> : null}
-              <input type="hidden" name="courtMemberPackageId" value={selectedCourtMemberPackageId} />
+              <input type="hidden" name="courtMemberPackageId" value={selectedCourtMemberPackageId || NO_MEMBER_PACKAGE_VALUE} />
               <label>
                 Paket member
                 <select
