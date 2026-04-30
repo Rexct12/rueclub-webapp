@@ -23,6 +23,7 @@ type TimeFormat = "12h" | "24h";
 type ColorMode = "light" | "dark";
 type SessionSortKey = "date" | "venue" | "profit";
 type SortDirection = "asc" | "desc";
+type SessionMemberFilter = "all" | "member" | "non-member";
 type CourtMemberPackageUsageInfo = { usedHours: number; remainingHours: number };
 const dateFormatOptions = [
   ["yyyy-mm-dd", "YYYY-MM-DD"],
@@ -267,6 +268,7 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
   const [sessionSortKey, setSessionSortKey] = useState<SessionSortKey>("date");
   const [sessionSortDirection, setSessionSortDirection] = useState<SortDirection>("desc");
   const [sessionVenueFilter, setSessionVenueFilter] = useState("all");
+  const [sessionMemberFilter, setSessionMemberFilter] = useState<SessionMemberFilter>("all");
   const [isPending, startTransition] = useTransition();
   const today = todayInBangkok();
 
@@ -362,9 +364,18 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     return ["all", ...Array.from(venues).sort((a, b) => venueSortCollator.compare(a, b))];
   }, [activeSessions, venueSortCollator]);
   const filteredActiveSessions = useMemo(() => {
-    if (sessionVenueFilter === "all") return activeSessions;
-    return activeSessions.filter((session) => (session.venue ?? "").trim() === sessionVenueFilter);
-  }, [activeSessions, sessionVenueFilter]);
+    return activeSessions.filter((session) => {
+      const venueMatch = sessionVenueFilter === "all"
+        ? true
+        : (session.venue ?? "").trim() === sessionVenueFilter;
+      const memberMatch = sessionMemberFilter === "all"
+        ? true
+        : sessionMemberFilter === "member"
+          ? Boolean(session.courtMemberPackageId)
+          : !session.courtMemberPackageId;
+      return venueMatch && memberMatch;
+    });
+  }, [activeSessions, sessionMemberFilter, sessionVenueFilter]);
   const sortedActiveSessions = useMemo(() => {
     const sessions = [...filteredActiveSessions];
     sessions.sort((left, right) => {
@@ -386,6 +397,24 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
     });
     return sessions;
   }, [filteredActiveSessions, reportBySessionId, sessionSortDirection, sessionSortKey, venueSortCollator]);
+  const filteredSessionSummary = useMemo(() => {
+    let totalIncome = 0;
+    let totalExpense = 0;
+    let totalProfit = 0;
+    for (const session of sortedActiveSessions) {
+      const sessionReport = reportBySessionId.get(session.id);
+      if (!sessionReport) continue;
+      totalIncome += sessionReport.netIncome;
+      totalExpense += sessionReport.costOfService;
+      totalProfit += sessionReport.profit;
+    }
+    return {
+      count: sortedActiveSessions.length,
+      totalIncome,
+      totalExpense,
+      totalProfit,
+    };
+  }, [reportBySessionId, sortedActiveSessions]);
 
   const editingSession = editingSessionId ? data.sessions.find((session) => session.id === editingSessionId) ?? null : null;
   const editingSessionPayments = useMemo(() => editingSessionId ? data.participantPayments.filter((payment) => payment.sessionId === editingSessionId) : [], [data.participantPayments, editingSessionId]);
@@ -1054,11 +1083,24 @@ export function FinanceWorkspace({ userName, data, report, backend }: Props) {
                 ))}
               </select>
             </label>
+            <label className="session-sort-field">Filter paket member
+              <select value={sessionMemberFilter} onChange={(event) => setSessionMemberFilter(event.target.value as SessionMemberFilter)}>
+                <option value="all">Semua</option>
+                <option value="member">Hanya Member</option>
+                <option value="non-member">Tanpa Member</option>
+              </select>
+            </label>
             <div className="segmented-control session-sort-direction" role="group" aria-label="Arah urutan sesi berjalan">
               <button className={sessionSortDirection === "asc" ? "active" : ""} type="button" aria-pressed={sessionSortDirection === "asc"} onClick={() => setSessionSortDirection("asc")}>Ascending</button>
               <button className={sessionSortDirection === "desc" ? "active" : ""} type="button" aria-pressed={sessionSortDirection === "desc"} onClick={() => setSessionSortDirection("desc")}>Descending</button>
             </div>
           </div>
+          <section className="metric-band session-filter-summary" aria-label="Ringkasan sesi sesuai filter">
+            <Metric label="Sesi (Filter)" value={String(filteredSessionSummary.count)} />
+            <Metric label="Pemasukan (Filter)" value={formatCurrency(filteredSessionSummary.totalIncome)} />
+            <Metric label="Expense (Filter)" value={formatCurrency(filteredSessionSummary.totalExpense)} />
+            <Metric label="Profit (Filter)" value={formatCurrency(filteredSessionSummary.totalProfit)} tone={filteredSessionSummary.totalProfit < 0 ? "bad" : "good"} />
+          </section>
           <div className="session-board">
             {sortedActiveSessions.map((session) => {
               const sessionReport = reportBySessionId.get(session.id);
