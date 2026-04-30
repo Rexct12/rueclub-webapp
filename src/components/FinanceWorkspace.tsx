@@ -1556,10 +1556,10 @@ function SessionEditModal({
                 </select>
               </label>
               {activeSelectedPackage ? <input type="hidden" name="courtExpenseAccountId" value={courtExpenseAccountIdInput} /> : null}
+              <input type="hidden" name="courtMemberPackageId" value={selectedCourtMemberPackageId} />
               <label>
                 Paket member
                 <select
-                  name="courtMemberPackageId"
                   value={selectedCourtMemberPackageId}
                   onChange={(event) => {
                     const nextPackageId = event.target.value;
@@ -1588,9 +1588,9 @@ function SessionEditModal({
                   })}
                 </select>
               </label>
-              {!selectedCourtMemberPackageId ? <input type="hidden" name="memberUsageHours" value="0" /> : null}
+              <input type="hidden" name="memberUsageHours" value={selectedCourtMemberPackageId ? memberUsageHoursInput : "0"} />
               <label>Durasi Total<div className="input-with-suffix"><input name="totalDurationHours" type="number" min={1} step={0.25} value={totalDurationHoursInput} onChange={(event) => setTotalDurationHoursInput(event.target.value)} /><span>Jam</span></div></label>
-              <label>Durasi Member<div className="input-with-suffix"><input name="memberUsageHours" type="number" min={0} step={0.25} max={totalDurationHoursInput || undefined} value={memberUsageHoursInput} onChange={(event) => setMemberUsageHoursInput(event.target.value)} /><span>Jam</span></div></label>
+              <label>Durasi Member<div className="input-with-suffix"><input name="memberUsageHoursDisplay" type="number" min={0} step={0.25} max={totalDurationHoursInput || undefined} value={memberUsageHoursInput} onChange={(event) => setMemberUsageHoursInput(event.target.value)} disabled={!selectedCourtMemberPackageId} /><span>Jam</span></div></label>
               <label>Status<select name="active" defaultValue={String(session.active)}><option value="true">Aktif</option><option value="false">Nonaktif</option></select></label>
               <label className="checkbox inline-checkbox"><input name="courtFree" type="checkbox" defaultChecked={session.courtFree} /> Lapangan free</label>
               {isSaving ? <p className="inline-status wide-field">Menyimpan perubahan sesi...</p> : null}
